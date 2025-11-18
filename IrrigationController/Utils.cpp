@@ -8,7 +8,8 @@ String normalizePhone(const String &in) {
   s.trim();
   s.replace(" ", "");
   if (s.length() > 0 && s.charAt(0) == '0') s = s.substring(1);
-  if (s.length() == 10 && s.charAt(0) != '+') s = String("+91") + s;
+  // Use configurable country code instead of hardcoded +91
+  if (s.length() == 10 && s.charAt(0) != '+') s = String(DEFAULT_COUNTRY_CODE) + s;
   return s;
 }
 

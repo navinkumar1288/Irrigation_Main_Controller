@@ -140,15 +140,20 @@ Schedule StorageManager::scheduleFromJson(const String &json) {
 
 void StorageManager::loadAllSchedules(std::vector<Schedule> &schedules) {
   schedules.clear();
-  
+
   if (!LittleFS.exists("/schedules")) {
     LittleFS.mkdir("/schedules");
     return;
   }
-  
+
   File root = LittleFS.open("/schedules");
+  if (!root) {
+    Serial.println("❌ Failed to open schedules directory");
+    return;
+  }
+
   File file = root.openNextFile();
-  
+
   while (file) {
     String name = file.name();
     if (name.endsWith(".json")) {
@@ -159,9 +164,12 @@ void StorageManager::loadAllSchedules(std::vector<Schedule> &schedules) {
         Serial.println("✓ Loaded schedule: " + s.id);
       }
     }
+    file.close();  // Close individual file
     file = root.openNextFile();
   }
-  
+
+  root.close();  // Close directory handle - FIX FOR FILE LEAK
+
   Serial.printf("✓ Loaded %d schedules\n", schedules.size());
 }
 

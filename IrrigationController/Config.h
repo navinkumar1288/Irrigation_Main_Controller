@@ -35,7 +35,7 @@
 #define MODEM_RX 45
 #define MODEM_TX 46
 #define MODEM_PWRKEY 4
-#define MODEM_RESET 5
+#define MODEM_RESET 15  // Changed from 5 to avoid conflict with LORA_SS
 
 // Pump Control
 #define PUMP_PIN 25
@@ -110,11 +110,14 @@
 #define SMS_ALERT_PHONE_2 "+0987654321"
 #define DEFAULT_ADMIN_PHONE SMS_ALERT_PHONE_1
 #define DEFAULT_RECOV_TOK "RECOVERY123"
+#define DEFAULT_COUNTRY_CODE "+91"  // Default country code for phone normalization
 
 #define SMS_ALERT_ON_BOOT true
 #define SMS_ALERT_ON_LOW_BATTERY true
 #define SMS_ALERT_ON_SCHEDULE_FAIL true
 #define SMS_ALERT_ON_COMMAND_FAIL true
+#define SMS_CHECK_INTERVAL_MS 10000  // Check for SMS every 10 seconds
+#define SMS_ALERT_RATE_LIMIT_MS 300000  // Minimum 5 minutes between duplicate alerts
 
 // ========== BLE Settings ==========
 #define BLE_DEVICE_NAME "IrrigationController"
@@ -241,8 +244,20 @@ extern bool ENABLE_SMS_BROADCAST;
 // ========== Network Settings ==========
 #define MQTT_CONNECT_TIMEOUT_MS 10000
 #define SMS_SEND_TIMEOUT_MS 30000
+#define NETWORK_REGISTRATION_TIMEOUT_S 120  // Increased from 60 to 120 seconds
 
 #define MQTT_MAX_RECONNECT_ATTEMPTS 5
 #define MQTT_RECONNECT_DELAY_MS 5000
+
+// ========== Forward Declarations ==========
+class MessageQueue;
+class StorageManager;
+class LoRaComm;
+class Preferences;
+
+extern MessageQueue incomingQueue;
+extern StorageManager storage;
+extern LoRaComm loraComm;
+extern Preferences prefs;
 
 #endif // CONFIG_H

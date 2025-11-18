@@ -3,6 +3,22 @@
 
 ModemMQTT::ModemMQTT() : mqttConnected(false), lastMqttCheck(0), mqttCheckInterval(30000) {}
 
+// Escape quotes and backslashes in strings for AT commands
+String ModemMQTT::escapeATString(const String &input) {
+  String result = "";
+  result.reserve(input.length() + 10);  // Reserve some extra space
+
+  for (unsigned int i = 0; i < input.length(); i++) {
+    char c = input.charAt(i);
+    if (c == '"' || c == '\\') {
+      result += '\\';  // Escape quote and backslash
+    }
+    result += c;
+  }
+
+  return result;
+}
+
 bool ModemMQTT::configure() {
   if (!modemReady) {
     Serial.println("[MQTT] ❌ Modem not ready for MQTT");
@@ -88,16 +104,20 @@ bool ModemMQTT::publish(const String &topic, const String &payload) {
       return false;
     }
   }
-  
+
+  // Escape topic and payload to prevent command injection
+  String escapedTopic = escapeATString(topic);
+  String escapedPayload = escapeATString(payload);
+
   // Publish message
   // AT+QMTPUB=<client_idx>,<msgID>,<qos>,<retain>,"<topic>","<msg>"
-  String pubCmd = "AT+QMTPUB=0,0,0,0,\"" + topic + "\",\"" + payload + "\"";
-  
+  String pubCmd = "AT+QMTPUB=0,0,0,0,\"" + escapedTopic + "\",\"" + escapedPayload + "\"";
+
   Serial.println("[MQTT] Publishing to topic: " + topic);
   Serial.println("[MQTT] Payload: " + payload);
-  
+
   String resp = sendCommand(pubCmd, 5000);
-  
+
   if (resp.indexOf("OK") >= 0) {
     Serial.println("[MQTT] ✓ Published successfully");
     return true;
@@ -113,15 +133,18 @@ bool ModemMQTT::subscribe(const String &topic) {
     Serial.println("[MQTT] ❌ Not connected");
     return false;
   }
-  
+
+  // Escape topic to prevent command injection
+  String escapedTopic = escapeATString(topic);
+
   // Subscribe to topic
   // AT+QMTSUB=<client_idx>,<msgID>,"<topic>",<qos>
-  String subCmd = "AT+QMTSUB=0,1,\"" + topic + "\",0";
-  
+  String subCmd = "AT+QMTSUB=0,1,\"" + escapedTopic + "\",0";
+
   Serial.println("[MQTT] Subscribing to topic: " + topic);
-  
+
   String resp = sendCommand(subCmd, 5000);
-  
+
   if (resp.indexOf("OK") >= 0) {
     Serial.println("[MQTT] ✓ Subscribed successfully");
     return true;

@@ -1,5 +1,6 @@
 // IrrigationController.ino - Updated with ModemMQTT and ModemSMS modules
 // Heartbeat DISABLED to save cellular data - only important events published
+#include <map>  // For SMS rate limiting
 #include "Config.h"
 #include "Utils.h"
 #include "MessageQueue.h"
@@ -46,6 +47,31 @@ RTC_DS3231 rtc;
 bool rtcAvailable = false;
 bool loraInitialized = false;
 
+// ========== SMS Rate Limiting ==========
+// Track last SMS alert time by key to prevent spam
+std::map<String, unsigned long> lastSMSAlertTime;
+
+bool shouldSendSMSAlert(const String &alertKey) {
+  unsigned long now = millis();
+
+  if (lastSMSAlertTime.find(alertKey) == lastSMSAlertTime.end()) {
+    // First time seeing this alert
+    lastSMSAlertTime[alertKey] = now;
+    return true;
+  }
+
+  unsigned long timeSinceLastAlert = now - lastSMSAlertTime[alertKey];
+
+  if (timeSinceLastAlert >= SMS_ALERT_RATE_LIMIT_MS) {
+    lastSMSAlertTime[alertKey] = now;
+    return true;
+  }
+
+  Serial.println("[SMS] Alert rate-limited: " + alertKey + " (sent " +
+                 String(timeSinceLastAlert/1000) + "s ago)");
+  return false;
+}
+
 // ========== Status Publishing ==========
 void publishStatus(const String &msg) {
   Serial.println("[Status] " + msg);
@@ -65,20 +91,27 @@ void publishStatus(const String &msg) {
 }
 
 // ========== SMS Notification Function ==========
-void sendSMSNotification(const String &message) {
+void sendSMSNotification(const String &message, const String &alertKey = "") {
   #if ENABLE_SMS_ALERTS
-  if (sms.isReady() && ENABLE_SMS_BROADCAST) {
-    // Send to configured phone numbers (defined in Config.h)
-    #ifdef SMS_ALERT_PHONE_1
-    sms.sendSMS(SMS_ALERT_PHONE_1, message);
-    Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_1));
-    #endif
-    
-    #ifdef SMS_ALERT_PHONE_2
-    sms.sendSMS(SMS_ALERT_PHONE_2, message);
-    Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_2));
-    #endif
+  if (!sms.isReady() || !ENABLE_SMS_BROADCAST) {
+    return;
   }
+
+  // Check rate limiting if alert key provided
+  if (alertKey.length() > 0 && !shouldSendSMSAlert(alertKey)) {
+    return;  // Skip sending - rate limited
+  }
+
+  // Send to configured phone numbers (defined in Config.h)
+  #ifdef SMS_ALERT_PHONE_1
+  sms.sendSMS(SMS_ALERT_PHONE_1, message);
+  Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_1));
+  #endif
+
+  #ifdef SMS_ALERT_PHONE_2
+  sms.sendSMS(SMS_ALERT_PHONE_2, message);
+  Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_2));
+  #endif
   #endif
 }
 
@@ -338,7 +371,12 @@ void setup() {
     Serial.println("      ✓ BLE OK");
   }
   #endif
-  
+
+  // Initialize Scheduler
+  Serial.println("[9/9] Scheduler...");
+  Serial.println("      ✓ Scheduler ready");
+  Serial.printf("      ✓ %d schedules loaded\n", schedules.size());
+
   // Final status
   Serial.println("\n========================================");
   Serial.println("✓ SETUP COMPLETE");
@@ -402,7 +440,7 @@ void loop() {
   
   // Check and process SMS commands periodically
   #if ENABLE_SMS_COMMANDS
-  if (millis() - lastSMSCheck > 10000) {  // Check every 10 seconds
+  if (millis() - lastSMSCheck > SMS_CHECK_INTERVAL_MS) {  // Configurable interval
     lastSMSCheck = millis();
     processSMSCommands();
   }
@@ -448,10 +486,11 @@ void loop() {
                 Serial.println("[Serial] ✗✗✗ FAILED ✗✗✗");
                 // Publish manual command failure (important event)
                 publishStatus("ERR|CMD|N=" + String(node) + "|C=" + cmd + "|FAIL");
-                
-                // Send SMS alert for failed commands (if enabled)
-                sendSMSNotification("ALERT: LoRa command failed. Node: " + 
-                                    String(node) + ", Cmd: " + cmd);
+
+                // Send SMS alert for failed commands (with rate limiting)
+                sendSMSNotification("ALERT: LoRa command failed. Node: " +
+                                    String(node) + ", Cmd: " + cmd,
+                                    "LORA_FAIL_N" + String(node));
               }
             } else {
               Serial.println("[Serial] ✗ LoRa not initialized");
@@ -503,9 +542,10 @@ void loop() {
           int battPct = battStr.toInt();
           if (battPct < 20) {
             publishStatus("WARN|LOW_BATT|N=" + String(nodeId) + "|BATT=" + battStr);
-            // Send SMS alert for low battery
-            sendSMSNotification("WARN: Low battery on Node " + String(nodeId) + 
-                                " - " + battStr + "%");
+            // Send SMS alert for low battery (with rate limiting to avoid spam)
+            sendSMSNotification("WARN: Low battery on Node " + String(nodeId) +
+                                " - " + battStr + "%",
+                                "LOW_BATT_N" + String(nodeId));
           }
         }
         
@@ -596,41 +636,44 @@ void loop() {
   // ========== Check Schedule Triggers ==========
   if (millis() - lastSchedulerCheck > 5000) {
     time_t now = time(nullptr);
-    
-    for (auto &sch : schedules) {
-      if (!sch.enabled) continue;
-      
-      if (sch.next_run_epoch == 0) {
-        sch.next_run_epoch = scheduleMgr.computeNextRun(sch, now);
-      }
-      
-      if (sch.next_run_epoch > 0 && now >= sch.next_run_epoch) {
-        Serial.println("[Scheduler] Triggering: " + sch.id);
-        
-        currentScheduleId = sch.id;
-        seq.clear();
-        for (auto &st : sch.seq) seq.push_back(st);
-        pumpOnBeforeMs = sch.pump_on_before_ms;
-        pumpOffAfterMs = sch.pump_off_after_ms;
-        scheduleStartEpoch = sch.next_run_epoch;
-        scheduleLoaded = true;
-        currentStepIndex = -1;
-        
-        // Publish schedule trigger (important event - keep this)
-        publishStatus("EVT|SCH|TRIGGER|S=" + sch.id);
-        
-        // Send SMS notification
-        sendSMSNotification("Schedule started: " + sch.id);
-        
-        if (sch.rec == 'O') {
-          sch.enabled = false;
+
+    // Only check for new schedules if none is currently running
+    if (!scheduleRunning && !scheduleLoaded) {
+      for (auto &sch : schedules) {
+        if (!sch.enabled) continue;
+
+        if (sch.next_run_epoch == 0) {
+          sch.next_run_epoch = scheduleMgr.computeNextRun(sch, now);
         }
-        
-        sch.next_run_epoch = scheduleMgr.computeNextRun(sch, now + 1);
-        break;
+
+        if (sch.next_run_epoch > 0 && now >= sch.next_run_epoch) {
+          Serial.println("[Scheduler] Triggering: " + sch.id);
+
+          currentScheduleId = sch.id;
+          seq.clear();
+          for (auto &st : sch.seq) seq.push_back(st);
+          pumpOnBeforeMs = sch.pump_on_before_ms;
+          pumpOffAfterMs = sch.pump_off_after_ms;
+          scheduleStartEpoch = sch.next_run_epoch;
+          scheduleLoaded = true;
+          currentStepIndex = -1;
+
+          // Publish schedule trigger (important event - keep this)
+          publishStatus("EVT|SCH|TRIGGER|S=" + sch.id);
+
+          // Send SMS notification
+          sendSMSNotification("Schedule started: " + sch.id);
+
+          if (sch.rec == 'O') {
+            sch.enabled = false;
+          }
+
+          sch.next_run_epoch = scheduleMgr.computeNextRun(sch, now + 1);
+          break;  // Only trigger one schedule at a time
+        }
       }
     }
-    
+
     lastSchedulerCheck = millis();
   }
   

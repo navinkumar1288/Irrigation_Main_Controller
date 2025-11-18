@@ -245,6 +245,16 @@ void ScheduleManager::startIfDue() {
   
   if (startIndex < 0) {
     Serial.println("❌ No node responded, aborting");
+
+    // Notify about schedule failure
+    publishStatus("ERR|SCH|START_FAIL|S=" + currentScheduleId + "|NO_NODES");
+    sendSMSNotification("ERROR: Schedule '" + currentScheduleId +
+                        "' failed to start - no nodes responded",
+                        "SCH_START_FAIL");
+
+    // Clear the loaded schedule
+    scheduleLoaded = false;
+    currentScheduleId = "";
     return;
   }
   
@@ -256,6 +266,8 @@ void ScheduleManager::startIfDue() {
   
   // Turn on pump
   setPump(true);
+  // NOTE: This delay blocks the entire system (MQTT, SMS, LoRa processing)
+  // TODO: Refactor to non-blocking state machine for better responsiveness
   delay(pumpOnBeforeMs);
   
   scheduleRunning = true;
@@ -306,6 +318,8 @@ void ScheduleManager::runLoop() {
       Serial.printf("✓ Moved to step %d\n", currentStepIndex);
     } else {
       Serial.println("✓ Schedule complete");
+      // NOTE: This delay blocks the entire system (MQTT, SMS, LoRa processing)
+      // TODO: Refactor to non-blocking state machine for better responsiveness
       delay(pumpOffAfterMs);
       setPump(false);
       scheduleRunning = false;
