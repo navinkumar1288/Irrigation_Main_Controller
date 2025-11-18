@@ -126,8 +126,10 @@
 #define CHARACTERISTIC_UUID_TX "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 // BLE Connection Parameters (units of 1.25ms)
-#define BLE_MIN_CONN_INTERVAL 0x06  // 7.5ms (6 * 1.25ms)
-#define BLE_MAX_CONN_INTERVAL 0x12  // 22.5ms (18 * 1.25ms)
+// Using more conservative intervals for better connection stability
+// Previous values (7.5-22.5ms) were too aggressive and caused disconnections
+#define BLE_MIN_CONN_INTERVAL 0x40  // 80ms (64 * 1.25ms) - stable for most clients
+#define BLE_MAX_CONN_INTERVAL 0xA0  // 200ms (160 * 1.25ms) - good balance
 #define BLE_MTU_SIZE 512            // Maximum Transmission Unit size
 
 // ========== Display Settings ==========
