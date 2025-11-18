@@ -1,0 +1,652 @@
+// IrrigationController.ino - Updated with ModemMQTT and ModemSMS modules
+// Heartbeat DISABLED to save cellular data - only important events published
+#include "Config.h"
+#include "Utils.h"
+#include "MessageQueue.h"
+#include "StorageManager.h"
+#include "TimeManager.h"
+#include "DisplayManager.h"
+#include "LoRaComm.h"
+#include "ModemMQTT.h"        // NEW: MQTT module
+#include "ModemSMS.h"         // NEW: SMS module
+#include "BLEComm.h"
+#include "ScheduleManager.h"
+
+// ========== Global Variable Definitions ==========
+SystemConfig sysConfig;
+std::vector<Schedule> schedules;
+String currentScheduleId = "";
+std::vector<SeqStep> seq;
+int currentStepIndex = -1;
+unsigned long stepStartMillis = 0;
+bool scheduleLoaded = false;
+bool scheduleRunning = false;
+time_t scheduleStartEpoch = 0;
+uint32_t pumpOnBeforeMs = PUMP_ON_LEAD_DEFAULT_MS;
+uint32_t pumpOffAfterMs = PUMP_OFF_DELAY_DEFAULT_MS;
+uint32_t LAST_CLOSE_DELAY_MS = LAST_CLOSE_DELAY_MS_DEFAULT;
+uint32_t DRIFT_THRESHOLD_S = 300;
+uint32_t SYNC_CHECK_INTERVAL_MS = 3600000UL;
+bool ENABLE_SMS_BROADCAST = true;
+
+// ========== Module Instances ==========
+Preferences prefs;
+MessageQueue incomingQueue;
+StorageManager storage;
+TimeManager timeManager;
+DisplayManager displayMgr;
+LoRaComm loraComm;
+ModemMQTT mqtt;               // NEW: MQTT instance
+ModemSMS sms;                 // NEW: SMS instance
+BLEComm bleComm;
+ScheduleManager scheduleMgr;
+
+TwoWire WireRTC = TwoWire(1);
+RTC_DS3231 rtc;
+bool rtcAvailable = false;
+bool loraInitialized = false;
+
+// ========== Status Publishing ==========
+void publishStatus(const String &msg) {
+  Serial.println("[Status] " + msg);
+  
+  #if ENABLE_MQTT
+  if (mqtt.isConnected()) {
+    mqtt.publish(MQTT_TOPIC_STATUS, msg);
+    Serial.println("[Status] → Published to MQTT");
+  }
+  #endif
+  
+  #if ENABLE_BLE
+  if (bleComm.isConnected()) {
+    bleComm.notify("STAT|" + msg);
+  }
+  #endif
+}
+
+// ========== SMS Notification Function ==========
+void sendSMSNotification(const String &message) {
+  #if ENABLE_SMS_ALERTS
+  if (sms.isReady() && ENABLE_SMS_BROADCAST) {
+    // Send to configured phone numbers (defined in Config.h)
+    #ifdef SMS_ALERT_PHONE_1
+    sms.sendSMS(SMS_ALERT_PHONE_1, message);
+    Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_1));
+    #endif
+    
+    #ifdef SMS_ALERT_PHONE_2
+    sms.sendSMS(SMS_ALERT_PHONE_2, message);
+    Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_2));
+    #endif
+  }
+  #endif
+}
+
+// ========== Process SMS Commands ==========
+void processSMSCommands() {
+  #if ENABLE_SMS_COMMANDS
+  if (!sms.isReady()) return;
+  
+  // Check for new messages
+  if (sms.checkNewMessages()) {
+    int count = sms.getUnreadCount();
+    Serial.println("[SMS] 📨 " + String(count) + " unread message(s)");
+    
+    // Process each message
+    for (int i = 1; i <= count; i++) {
+      SMSMessage msg;
+      if (sms.readSMS(i, msg)) {
+        Serial.println("\n[SMS] ==================");
+        Serial.println("[SMS] From: " + msg.sender);
+        Serial.println("[SMS] Time: " + msg.timestamp);
+        Serial.println("[SMS] Message: " + msg.message);
+        
+        // Process command
+        String cmd = msg.message;
+        cmd.trim();
+        cmd.toUpperCase();
+        
+        String response = "";
+        
+        // STATUS command
+        if (cmd == "STATUS") {
+          response = "System OK. ";
+          response += "MQTT: " + String(mqtt.isConnected() ? "ON" : "OFF") + ", ";
+          response += "LoRa: " + String(loraInitialized ? "ON" : "OFF");
+          if (scheduleRunning) {
+            response += ", Schedule: RUNNING";
+          }
+        }
+        // SCHEDULES command
+        else if (cmd == "SCHEDULES") {
+          response = "Schedules: ";
+          int enabledCount = 0;
+          for (auto &sch : schedules) {
+            if (sch.enabled) enabledCount++;
+          }
+          response += String(enabledCount) + "/" + String(schedules.size()) + " enabled";
+        }
+        // START command (for testing)
+        else if (cmd.startsWith("START ")) {
+          String schedId = cmd.substring(6);
+          schedId.trim();
+          response = "Starting schedule: " + schedId;
+          // Trigger schedule logic here
+        }
+        // STOP command
+        else if (cmd == "STOP") {
+          scheduleRunning = false;
+          scheduleLoaded = false;
+          response = "All schedules stopped";
+          publishStatus("EVT|SMS_CMD|STOP");
+        }
+        // ENABLE SMS
+        else if (cmd == "SMS ON") {
+          ENABLE_SMS_BROADCAST = true;
+          response = "SMS alerts enabled";
+        }
+        // DISABLE SMS
+        else if (cmd == "SMS OFF") {
+          ENABLE_SMS_BROADCAST = false;
+          response = "SMS alerts disabled";
+        }
+        // NODE command - send LoRa command
+        else if (cmd.startsWith("NODE ")) {
+          // Format: NODE <id> <command>
+          // Example: NODE 1 STATUS
+          int space1 = cmd.indexOf(' ', 5);
+          if (space1 > 0) {
+            String nodeStr = cmd.substring(5, space1);
+            String nodeCmd = cmd.substring(space1 + 1);
+            int nodeId = nodeStr.toInt();
+            
+            #if ENABLE_LORA
+            if (loraInitialized && nodeId > 0 && nodeId <= 255) {
+              bool result = loraComm.sendWithAck(nodeCmd, nodeId, "", 0, 0);
+              if (result) {
+                response = "Node " + String(nodeId) + " OK: " + nodeCmd;
+              } else {
+                response = "Node " + String(nodeId) + " TIMEOUT";
+              }
+            } else {
+              response = "LoRa not available or invalid node";
+            }
+            #else
+            response = "LoRa disabled";
+            #endif
+          } else {
+            response = "Format: NODE <id> <cmd>";
+          }
+        }
+        // HELP command
+        else if (cmd == "HELP") {
+          response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, NODE <id> <cmd>, HELP";
+        }
+        // Unknown command
+        else {
+          response = "Unknown command. Send HELP for list.";
+        }
+        
+        // Send response
+        if (response.length() > 0) {
+          sms.sendSMS(msg.sender, response);
+          Serial.println("[SMS] Response: " + response);
+        }
+        
+        // Delete processed message
+        sms.deleteSMS(msg.index);
+        
+        Serial.println("[SMS] ==================\n");
+        
+        // Publish SMS command event
+        publishStatus("EVT|SMS_CMD|" + cmd);
+      }
+    }
+  }
+  #endif
+}
+
+// ========== BLE Command Handler Callback ==========
+void handleBLECommand(int node, String command) {
+  Serial.printf("[BLE Handler] Node=%d, Command=%s\n", node, command.c_str());
+  
+  #if ENABLE_LORA
+  if (loraInitialized) {
+    bool result = loraComm.sendWithAck(command, node, "", 0, 0);
+    
+    String response;
+    if (result) {
+      response = "OK|Node " + String(node) + " responded";
+      Serial.println("[BLE Handler] ✓ Success");
+    } else {
+      response = "FAIL|Node " + String(node) + " timeout";
+      Serial.println("[BLE Handler] ✗ Failed");
+    }
+    
+    #if ENABLE_BLE
+    bleComm.notify(response);
+    #endif
+  } else {
+    #if ENABLE_BLE
+    bleComm.notify("ERROR|LoRa not initialized");
+    #endif
+  }
+  #else
+  #if ENABLE_BLE
+  bleComm.notify("ERROR|LoRa disabled");
+  #endif
+  #endif
+}
+
+// ========== Setup ==========
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  
+  Serial.println("\n\n");
+  Serial.println("========================================");
+  Serial.println("  Irrigation Controller v2.0");
+  Serial.println("  Event-Driven Status (No Heartbeat)");
+  Serial.println("  MQTT + SMS Modules (Refactored)");
+  Serial.println("========================================\n");
+  
+  // Initialize storage
+  Serial.println("[1/9] Storage...");
+  if (storage.init()) {
+    Serial.println("      ✓ Storage OK");
+  }
+  
+  // Initialize preferences
+  Serial.println("[2/9] Preferences...");
+  prefs.begin("irrig", false);
+  Serial.println("      ✓ Prefs OK");
+  
+  // Load config
+  Serial.println("[3/9] Config...");
+  storage.loadSystemConfig(sysConfig);
+  storage.loadAllSchedules(schedules);
+  Serial.println("      ✓ Config loaded");
+  
+  // Initialize display
+  Serial.println("[4/9] Display...");
+  #if ENABLE_DISPLAY
+  if (displayMgr.init()) {
+    displayMgr.showMessage("Irrigation", "Controller v2.0", "Initializing...", "");
+    Serial.println("      ✓ Display OK");
+  }
+  #endif
+  
+  // Initialize RTC
+  Serial.println("[5/9] RTC...");
+  #if ENABLE_RTC
+  rtcAvailable = timeManager.init(&WireRTC);
+  if (rtcAvailable) {
+    Serial.println("      ✓ RTC OK");
+  }
+  #endif
+  
+  // Initialize LoRa
+  Serial.println("[6/9] LoRa...");
+  #if ENABLE_LORA
+  delay(500);
+  if (loraComm.init()) {
+    loraInitialized = true;
+    Serial.println("      ✓ LoRa OK");
+  } else {
+    Serial.println("      ❌ LoRa FAILED");
+  }
+  #endif
+  
+  // Initialize Modem (base initialization)
+  Serial.println("[7/9] Modem...");
+  #if ENABLE_MODEM
+  if (mqtt.init()) {
+    Serial.println("      ✓ Modem initialized");
+    
+    // Configure MQTT
+    #if ENABLE_MQTT
+    Serial.println("      → Configuring MQTT...");
+    if (mqtt.configure()) {
+      Serial.println("      ✓ MQTT configured");
+      // Subscribe to command topics
+      mqtt.subscribe(MQTT_TOPIC_COMMANDS);
+      Serial.println("      ✓ Subscribed to commands");
+    } else {
+      Serial.println("      ❌ MQTT configuration failed");
+    }
+    #endif
+    
+    // Configure SMS
+    #if ENABLE_SMS
+    Serial.println("      → Configuring SMS...");
+    if (sms.configure()) {
+      Serial.println("      ✓ SMS configured");
+    } else {
+      Serial.println("      ❌ SMS configuration failed");
+    }
+    #endif
+  } else {
+    Serial.println("      ❌ Modem initialization failed");
+  }
+  #endif
+  
+  // Initialize BLE
+  Serial.println("[8/9] BLE...");
+  #if ENABLE_BLE
+  if (bleComm.init()) {
+    bleComm.setCommandCallback(handleBLECommand);
+    Serial.println("      ✓ BLE OK");
+  }
+  #endif
+  
+  // Final status
+  Serial.println("\n========================================");
+  Serial.println("✓ SETUP COMPLETE");
+  Serial.println("========================================");
+  Serial.println("LoRa:    " + String(loraInitialized ? "OK" : "FAILED"));
+  Serial.println("MQTT:    " + String(mqtt.isConnected() ? "CONNECTED" : "DISCONNECTED"));
+  Serial.println("SMS:     " + String(sms.isReady() ? "READY" : "NOT READY"));
+  Serial.println("========================================\n");
+  
+  if (loraInitialized) {
+    Serial.println("Ready for commands!");
+    Serial.println("Serial Commands:");
+    Serial.println("  <node> <command>");
+    Serial.println("Examples:");
+    Serial.println("  1 PING");
+    Serial.println("  1 STATUS");
+    Serial.println("  1 OPEN");
+    Serial.println("  1 CLOSE");
+    Serial.println();
+  }
+  
+  Serial.println("SMS Commands:");
+  Serial.println("  STATUS - Get system status");
+  Serial.println("  SCHEDULES - List schedules");
+  Serial.println("  STOP - Stop all schedules");
+  Serial.println("  SMS ON/OFF - Enable/disable SMS alerts");
+  Serial.println("  NODE <id> <cmd> - Send LoRa command");
+  Serial.println("  HELP - Show commands");
+  Serial.println();
+  
+  // Publish boot event (important event - keep this)
+  publishStatus("EVT|BOOT|OK|V2.0");
+  
+  // Send SMS boot notification
+  sendSMSNotification("Irrigation Controller v2.0 Started. MQTT: " + 
+                      String(mqtt.isConnected() ? "ON" : "OFF") + 
+                      ", LoRa: " + String(loraInitialized ? "ON" : "OFF"));
+}
+
+// ========== Main Loop ==========
+unsigned long lastSchedulerCheck = 0;
+unsigned long lastSMSCheck = 0;
+
+void loop() {
+  // Process LoRa incoming
+  #if ENABLE_LORA
+  if (loraInitialized) {
+    loraComm.processIncoming();
+  }
+  #endif
+  
+  // Process MQTT background (handles auto-reconnect, URCs)
+  #if ENABLE_MQTT
+  mqtt.processBackground();
+  #endif
+  
+  // Process SMS background (handles new messages, URCs)
+  #if ENABLE_SMS
+  sms.processBackground();
+  #endif
+  
+  // Check and process SMS commands periodically
+  #if ENABLE_SMS_COMMANDS
+  if (millis() - lastSMSCheck > 10000) {  // Check every 10 seconds
+    lastSMSCheck = millis();
+    processSMSCommands();
+  }
+  #endif
+  
+  // ========== Process Serial Commands ==========
+  if (Serial.available()) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    
+    if (line.length() > 0) {
+      Serial.println("\n[Serial] ==================");
+      Serial.println("[Serial] Input: " + line);
+      
+      // Check if it's a schedule
+      if (line.startsWith("SCH|") || line.startsWith("{")) {
+        Serial.println("[Serial] Schedule detected, queuing...");
+        if (line.indexOf("SRC=") < 0) line += ",SRC=SERIAL";
+        incomingQueue.enqueue(line);
+      }
+      // It's a simple command: <node> <command>
+      else {
+        int space = line.indexOf(' ');
+        if (space > 0) {
+          int node = line.substring(0, space).toInt();
+          String cmd = line.substring(space + 1);
+          cmd.toUpperCase();
+          cmd.trim();
+          
+          if (node > 0 && node <= 255 && cmd.length() > 0) {
+            Serial.printf("[Serial] Node: %d, Command: %s\n", node, cmd.c_str());
+            
+            #if ENABLE_LORA
+            if (loraInitialized) {
+              Serial.println("[Serial] Sending via LoRa...");
+              bool result = loraComm.sendWithAck(cmd, node, "", 0, 0);
+              
+              if (result) {
+                Serial.println("[Serial] ✓✓✓ SUCCESS ✓✓✓");
+                // Publish manual command success (important event)
+                publishStatus("EVT|CMD|N=" + String(node) + "|C=" + cmd + "|OK");
+              } else {
+                Serial.println("[Serial] ✗✗✗ FAILED ✗✗✗");
+                // Publish manual command failure (important event)
+                publishStatus("ERR|CMD|N=" + String(node) + "|C=" + cmd + "|FAIL");
+                
+                // Send SMS alert for failed commands (if enabled)
+                sendSMSNotification("ALERT: LoRa command failed. Node: " + 
+                                    String(node) + ", Cmd: " + cmd);
+              }
+            } else {
+              Serial.println("[Serial] ✗ LoRa not initialized");
+            }
+            #else
+            Serial.println("[Serial] ✗ LoRa disabled");
+            #endif
+          } else {
+            Serial.println("[Serial] ✗ Invalid format");
+            Serial.println("[Serial] Use: <node> <command>");
+            Serial.println("[Serial] Example: 1 PING");
+          }
+        } else {
+          Serial.println("[Serial] ✗ Invalid format");
+          Serial.println("[Serial] Use: <node> <command>");
+        }
+      }
+      
+      Serial.println("[Serial] ==================\n");
+    }
+  }
+  
+  // ========== Process Queued Messages ==========
+  String msg;
+  if (incomingQueue.dequeue(msg)) {
+    Serial.println("\n[Queue] ==================");
+    Serial.println("[Queue] Processing: " + msg);
+    
+    // Handle STAT messages from nodes
+    if (msg.startsWith("STAT|")) {
+      Serial.println("[Queue] ✓✓✓ TELEMETRY ✓✓✓");
+      
+      int nPos = msg.indexOf("N=");
+      if (nPos >= 0) {
+        int comma = msg.indexOf(',', nPos);
+        String nodeIdStr = msg.substring(nPos + 2, comma > 0 ? comma : msg.length());
+        int nodeId = nodeIdStr.toInt();
+        
+        Serial.printf("[Queue] Node %d Telemetry:\n", nodeId);
+        
+        // Parse battery
+        if (msg.indexOf("BATT=") >= 0) {
+          int battPos = msg.indexOf("BATT=");
+          int battEnd = msg.indexOf(',', battPos);
+          String battStr = msg.substring(battPos + 5, battEnd > 0 ? battEnd : msg.length());
+          Serial.println("[Queue]   Battery: " + battStr + "%");
+          
+          // Publish low battery warning (important event)
+          int battPct = battStr.toInt();
+          if (battPct < 20) {
+            publishStatus("WARN|LOW_BATT|N=" + String(nodeId) + "|BATT=" + battStr);
+            // Send SMS alert for low battery
+            sendSMSNotification("WARN: Low battery on Node " + String(nodeId) + 
+                                " - " + battStr + "%");
+          }
+        }
+        
+        // Parse battery voltage
+        if (msg.indexOf("BV=") >= 0) {
+          int bvPos = msg.indexOf("BV=");
+          int bvEnd = msg.indexOf(',', bvPos);
+          String bvStr = msg.substring(bvPos + 3, bvEnd > 0 ? bvEnd : msg.length());
+          Serial.println("[Queue]   Batt Voltage: " + bvStr + "V");
+        }
+        
+        // Parse solar
+        if (msg.indexOf("SOLV=") >= 0) {
+          int solPos = msg.indexOf("SOLV=");
+          int solEnd = msg.indexOf(',', solPos);
+          String solStr = msg.substring(solPos + 5, solEnd > 0 ? solEnd : msg.length());
+          Serial.println("[Queue]   Solar: " + solStr + "V");
+        }
+        
+        // Parse valve states
+        for (int i = 1; i <= 4; i++) {
+          String vKey = "V" + String(i) + "=";
+          if (msg.indexOf(vKey) >= 0) {
+            int vPos = msg.indexOf(vKey);
+            int vEnd = msg.indexOf(',', vPos);
+            String vStr = msg.substring(vPos + vKey.length(), vEnd > 0 ? vEnd : msg.length());
+            Serial.println("[Queue]   Valve " + String(i) + ": " + vStr);
+          }
+        }
+        
+        // Parse moisture sensors
+        for (int i = 1; i <= 4; i++) {
+          String mKey = "M" + String(i) + "=";
+          if (msg.indexOf(mKey) >= 0) {
+            int mPos = msg.indexOf(mKey);
+            int mEnd = msg.indexOf(',', mPos);
+            String mStr = msg.substring(mPos + mKey.length(), mEnd > 0 ? mEnd : msg.length());
+            Serial.println("[Queue]   Moisture " + String(i) + ": " + mStr + "%");
+          }
+        }
+      }
+    }
+    // Handle AUTO_CLOSE
+    else if (msg.startsWith("AUTO_CLOSE|")) {
+      Serial.println("[Queue] ✓✓✓ AUTO_CLOSE ✓✓✓");
+      Serial.println("[Queue] " + msg);
+      
+      // Parse node ID
+      int nPos = msg.indexOf("N=");
+      String nodeStr = "";
+      if (nPos >= 0) {
+        int comma = msg.indexOf(',', nPos);
+        nodeStr = msg.substring(nPos + 2, comma > 0 ? comma : msg.length());
+      }
+      
+      // Publish auto-close event (important event - keep this)
+      publishStatus("EVT|AUTO_CLOSE|N=" + nodeStr);
+    }
+    // Handle schedules
+    else if (msg.indexOf("SCH|") >= 0 || msg.startsWith("{")) {
+      Serial.println("[Queue] Schedule message");
+      if (scheduleMgr.validateAndLoad(msg)) {
+        Serial.println("[Queue] ✓ Schedule loaded");
+        // Publish schedule load success (important event - keep this)
+        publishStatus("EVT|SCH|LOADED");
+        // Send SMS notification
+        sendSMSNotification("Schedule loaded successfully");
+      } else {
+        Serial.println("[Queue] ✗ Schedule invalid");
+        // Publish schedule load failure (important event - keep this)
+        publishStatus("ERR|SCH|INVALID");
+        // Send SMS alert
+        sendSMSNotification("ERROR: Invalid schedule format");
+      }
+    }
+    // Unknown
+    else {
+      Serial.println("[Queue] Unknown message type");
+      Serial.println("[Queue] " + msg);
+    }
+    
+    Serial.println("[Queue] ==================\n");
+  }
+  
+  // ========== Run Scheduler ==========
+  scheduleMgr.runLoop();
+  
+  // ========== Check Schedule Triggers ==========
+  if (millis() - lastSchedulerCheck > 5000) {
+    time_t now = time(nullptr);
+    
+    for (auto &sch : schedules) {
+      if (!sch.enabled) continue;
+      
+      if (sch.next_run_epoch == 0) {
+        sch.next_run_epoch = scheduleMgr.computeNextRun(sch, now);
+      }
+      
+      if (sch.next_run_epoch > 0 && now >= sch.next_run_epoch) {
+        Serial.println("[Scheduler] Triggering: " + sch.id);
+        
+        currentScheduleId = sch.id;
+        seq.clear();
+        for (auto &st : sch.seq) seq.push_back(st);
+        pumpOnBeforeMs = sch.pump_on_before_ms;
+        pumpOffAfterMs = sch.pump_off_after_ms;
+        scheduleStartEpoch = sch.next_run_epoch;
+        scheduleLoaded = true;
+        currentStepIndex = -1;
+        
+        // Publish schedule trigger (important event - keep this)
+        publishStatus("EVT|SCH|TRIGGER|S=" + sch.id);
+        
+        // Send SMS notification
+        sendSMSNotification("Schedule started: " + sch.id);
+        
+        if (sch.rec == 'O') {
+          sch.enabled = false;
+        }
+        
+        sch.next_run_epoch = scheduleMgr.computeNextRun(sch, now + 1);
+        break;
+      }
+    }
+    
+    lastSchedulerCheck = millis();
+  }
+  
+  // ========== Check RTC Drift ==========
+  #if ENABLE_RTC
+  timeManager.checkDrift();
+  #endif
+  
+  // ========== HEARTBEAT REMOVED ==========
+  // Periodic heartbeat publishing has been DISABLED to save cellular data
+  // Only important events (errors, schedule triggers, low battery, etc.) are published
+  
+  // ========== Update Display ==========
+  #if ENABLE_DISPLAY
+  displayMgr.update();
+  #endif
+  
+  delay(10);
+}
