@@ -28,6 +28,12 @@ void LoRaComm::onTxTimeout(void) {
 }
 
 void LoRaComm::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
+  // Validate payload pointer and size
+  if (payload == nullptr || size == 0) {
+    Serial.println("[LoRa] ⚠ Invalid payload in onRxDone");
+    return;
+  }
+
   if (size >= LORA_BUFFER_SIZE) size = LORA_BUFFER_SIZE - 1;
   memcpy(rxBuffer, payload, size);
   rxBuffer[size] = '\0';

@@ -75,8 +75,8 @@ bool ModemBase::init() {
   Serial.println("[Modem] Waiting for network registration...");
   bool registered = false;
   int attempts = 0;
-  
-  while (attempts < 60 && !registered) {  // Try for 60 seconds
+
+  while (attempts < NETWORK_REGISTRATION_TIMEOUT_S && !registered) {  // Configurable timeout
     String creg = sendCommand("AT+CREG?", 1000);
     String cgreg = sendCommand("AT+CGREG?", 1000);
     

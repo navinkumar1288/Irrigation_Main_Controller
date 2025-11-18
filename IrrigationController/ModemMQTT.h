@@ -11,9 +11,10 @@ private:
   bool mqttConnected;
   unsigned long lastMqttCheck;
   unsigned long mqttCheckInterval;
-  
+
   bool openMQTTConnection();
   bool connectMQTTBroker();
+  String escapeATString(const String &input);  // Escape quotes for AT commands
 
 public:
   ModemMQTT();
