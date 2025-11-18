@@ -125,6 +125,11 @@
 #define CHARACTERISTIC_UUID_RX "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 #define CHARACTERISTIC_UUID_TX "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
+// BLE Connection Parameters (units of 1.25ms)
+#define BLE_MIN_CONN_INTERVAL 0x06  // 7.5ms (6 * 1.25ms)
+#define BLE_MAX_CONN_INTERVAL 0x12  // 22.5ms (18 * 1.25ms)
+#define BLE_MTU_SIZE 512            // Maximum Transmission Unit size
+
 // ========== Display Settings ==========
 #define DISPLAY_REFRESH_MS 1000
 

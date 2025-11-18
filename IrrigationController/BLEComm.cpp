@@ -6,12 +6,21 @@ class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) override {
     bleComm.setConnected(true);
     Serial.println("[BLE] Client connected");
+
+    // Request MTU size increase for better throughput
+    // Default MTU is 23 bytes, requesting 512 bytes
+    delay(100);  // Small delay to let connection stabilize
+    Serial.println("[BLE] Connection established, MTU negotiation in progress");
   }
-  
+
   void onDisconnect(BLEServer* pServer) override {
     bleComm.setConnected(false);
     Serial.println("[BLE] Client disconnected");
+
+    // Small delay before restarting advertising to prevent rapid reconnect issues
+    delay(500);
     BLEDevice::startAdvertising();
+    Serial.println("[BLE] Advertising restarted");
   }
 };
 
@@ -74,65 +83,79 @@ BLEComm::BLEComm() : server(nullptr), txChar(nullptr), rxChar(nullptr), connecte
 
 bool BLEComm::init() {
   Serial.println("[BLE] Initializing...");
-  
-  BLEDevice::init("IrrigCtrl");
-  
+
+  // Initialize BLE with device name from Config.h
+  BLEDevice::init(BLE_DEVICE_NAME);
+
   server = BLEDevice::createServer();
   if (!server) {
     Serial.println("❌ BLE server creation failed");
     return false;
   }
-  
+
   server->setCallbacks(new MyServerCallbacks());
-  
+
+  // Set MTU size for better data transfer
+  BLEDevice::setMTU(BLE_MTU_SIZE);
+
   BLEService *pService = server->createService(SERVICE_UUID);
   if (!pService) {
     Serial.println("❌ BLE service creation failed");
     return false;
   }
-  
+
   txChar = pService->createCharacteristic(
     CHARACTERISTIC_UUID_TX,
     BLECharacteristic::PROPERTY_NOTIFY
   );
-  
+
   if (txChar) {
     txChar->addDescriptor(new BLE2902());
     txChar->setValue("OK");
   } else {
     Serial.println("⚠ TX characteristic creation failed");
   }
-  
+
   rxChar = pService->createCharacteristic(
     CHARACTERISTIC_UUID_RX,
     BLECharacteristic::PROPERTY_WRITE
   );
-  
+
   if (rxChar) {
     rxChar->setCallbacks(new MyCharacteristicCallbacks());
   } else {
     Serial.println("⚠ RX characteristic creation failed");
   }
-  
+
   pService->start();
-  
+
+  // Configure advertising with proper connection parameters
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x00);
-  
+
+  // Fix connection interval parameters to prevent immediate disconnection
+  // Using configurable values from Config.h
+  // These values provide good balance between power and responsiveness
+  pAdvertising->setMinPreferred(BLE_MIN_CONN_INTERVAL);
+  pAdvertising->setMaxPreferred(BLE_MAX_CONN_INTERVAL);
+
   BLEAdvertisementData advData;
-  advData.setName("IrrigCtrl");
-  advData.setFlags(0x06);
+  advData.setName(BLE_DEVICE_NAME);
+  advData.setFlags(0x06);  // General discoverable, BR/EDR not supported
   pAdvertising->setAdvertisementData(advData);
-  
+
   BLEAdvertisementData scanResp;
-  scanResp.setName("IrrigCtrl");
+  scanResp.setName(BLE_DEVICE_NAME);
   pAdvertising->setScanResponseData(scanResp);
-  
+
   BLEDevice::startAdvertising();
-  
-  Serial.println("✓ BLE initialized, advertising as: IrrigCtrl");
+
+  Serial.println("✓ BLE initialized, advertising as: " + String(BLE_DEVICE_NAME));
+  Serial.printf("  MTU: %d bytes\n", BLE_MTU_SIZE);
+  Serial.printf("  Connection interval: %.1f-%.1fms\n",
+                BLE_MIN_CONN_INTERVAL * 1.25,
+                BLE_MAX_CONN_INTERVAL * 1.25);
   return true;
 }
 
