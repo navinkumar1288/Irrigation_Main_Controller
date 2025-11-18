@@ -12,6 +12,8 @@ int16_t LoRaComm::lastRssi = 0;
 int8_t LoRaComm::lastSnr = 0;
 String LoRaComm::lastRxMessage = "";
 
+static RadioEvents_t RadioEvents;
+
 LoRaComm::LoRaComm() {}
 
 // ========== Interrupt Handlers ==========
@@ -51,7 +53,7 @@ bool LoRaComm::init() {
 
   Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
 
-  static RadioEvents_t RadioEvents;  // CRITICAL: Must be static!
+  //static RadioEvents_t RadioEvents;  // CRITICAL: Must be static!
   RadioEvents.TxDone = onTxDone;
   RadioEvents.TxTimeout = onTxTimeout;
   RadioEvents.RxDone = onRxDone;

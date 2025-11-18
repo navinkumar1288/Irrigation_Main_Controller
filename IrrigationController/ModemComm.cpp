@@ -1,7 +1,7 @@
 // ModemComm.cpp - For Quectel EC200U Module
 #include "ModemComm.h"
 
-HardwareSerial SerialAT(1);  // Use Serial1 for modem
+//extern HardwareSerial SerialAT(1);  // Use Serial1 for modem
 
 ModemComm::ModemComm() : mqttConnected(false), modemReady(false) {}
 

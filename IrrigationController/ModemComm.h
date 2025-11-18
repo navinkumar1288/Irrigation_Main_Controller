@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include "Config.h"
 #include "Utils.h"
+#include "ModemBase.h"
 #include "MessageQueue.h"
 
 class ModemComm {

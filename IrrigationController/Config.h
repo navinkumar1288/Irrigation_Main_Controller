@@ -15,7 +15,7 @@
 #define ENABLE_SMS_COMMANDS 1
 #define ENABLE_SMS_ALERTS 1
 #define ENABLE_BLE 1
-#define ENABLE_DISPLAY 0
+#define ENABLE_DISPLAY 1
 #define ENABLE_RTC 1
 
 // ========== Buffer Sizes ==========
@@ -24,16 +24,16 @@
 
 // ========== Pin Definitions ==========
 // LoRa SX1276
-#define LORA_SCK 18
-#define LORA_MISO 19
-#define LORA_MOSI 23
-#define LORA_SS 5
-#define LORA_RST 14
-#define LORA_DIO0 2
+#define LORA_SCK 9
+#define LORA_MISO 11
+#define LORA_MOSI 10
+#define LORA_SS 8
+#define LORA_RST 12
+#define LORA_DIO0 14
 
 // Modem EC200U
-#define MODEM_RX 16
-#define MODEM_TX 17
+#define MODEM_RX 45
+#define MODEM_TX 46
 #define MODEM_PWRKEY 4
 #define MODEM_RESET 15  // Changed from 5 to avoid conflict with LORA_SS
 
@@ -42,26 +42,27 @@
 #define PUMP_ACTIVE_HIGH true
 
 // RTC DS3231
-#define RTC_SDA 21
-#define RTC_SCL 22
+#define RTC_SDA 41
+#define RTC_SCL 42
 
 // Display (if enabled)
 #define DISPLAY_SDA 21
 #define DISPLAY_SCL 22
 
 // ========== LoRa Settings ==========
-#define LORA_FREQUENCY 915E6          // 915 MHz for US
-#define RF_FREQUENCY 915000000        // Same as above in Hz
+// India uses 865-867 MHz ISM band for LoRa
+#define LORA_FREQUENCY 865E6          // 865 MHz for India (legal frequency)
+#define RF_FREQUENCY 865000000        // Same as above in Hz
 #define LORA_SYNC_WORD 0x12
-#define LORA_SPREADING_FACTOR 7
-#define LORA_BANDWIDTH 125000         // 125 kHz
+#define LORA_SPREADING_FACTOR 10
+#define LORA_BANDWIDTH 0         // 125 kHz
 #define LORA_CODINGRATE 1             // 4/5
 #define LORA_PREAMBLE_LENGTH 8
 #define LORA_SYMBOL_TIMEOUT 0
 #define LORA_FIX_LENGTH_PAYLOAD_ON false
 #define LORA_IQ_INVERSION_ON false
-#define TX_OUTPUT_POWER 20            // dBm
-#define LORA_TX_POWER 20
+#define TX_OUTPUT_POWER 14            // dBm (14-20 dBm allowed in India, use 14 for safety)
+#define LORA_TX_POWER 14
 
 #define LORA_GATEWAY_ID 255           // This device's ID
 #define LORA_BROADCAST_ID 0           // Broadcast address
@@ -71,23 +72,23 @@
 #define LORA_ACK_TIMEOUT_MS 5000
 
 // ========== WiFi Settings ==========
-#define WIFI_SSID "YourWiFiSSID"
-#define WIFI_PASS "YourWiFiPassword"
+#define WIFI_SSID "sekarfarm"
+#define WIFI_PASS "welcome123"
 #define WIFI_CONNECT_TIMEOUT_MS 15000
 
 // ========== NTP Settings ==========
 #define NTP_SERVER "pool.ntp.org"
-#define GMT_OFFSET_SEC (5.5 * 3600)   // IST = UTC+5:30 (adjust for your timezone)
+#define GMT_OFFSET_SEC (5.5 * 3600)   // IST = UTC+5:30
 #define DAYLIGHT_OFFSET_SEC 0
 #define NTP_TIMEOUT_MS 10000
 #define NTP_TIMEZONE_OFFSET 0
 
 // ========== MQTT Settings ==========
-#define MQTT_BROKER "your-mqtt-broker.com"
+#define MQTT_BROKER "39aff691b9b5421ab98adc2addedbd83.s1.eu.hivemq.cloud"
 #define MQTT_PORT 1883
 #define MQTT_CLIENT_ID "irrigation_controller_001"
-#define MQTT_USER "your_username"
-#define MQTT_PASS "your_password"
+#define MQTT_USER "navin"
+#define MQTT_PASS "HaiNavin33"
 
 #define MQTT_TOPIC_STATUS "irrigation/status"
 #define MQTT_TOPIC_COMMANDS "irrigation/commands"
@@ -101,11 +102,11 @@
 #define DEFAULT_MQTT_PASS MQTT_PASS
 
 // ========== Modem Settings ==========
-#define MODEM_APN "your-apn"
+#define MODEM_APN "airtelgprs.com"
 #define DEFAULT_SIM_APN MODEM_APN
 
 // ========== SMS Settings ==========
-#define SMS_ALERT_PHONE_1 "+1234567890"
+#define SMS_ALERT_PHONE_1 "+919944272647"
 #define SMS_ALERT_PHONE_2 "+0987654321"
 #define DEFAULT_ADMIN_PHONE SMS_ALERT_PHONE_1
 #define DEFAULT_RECOV_TOK "RECOVERY123"
