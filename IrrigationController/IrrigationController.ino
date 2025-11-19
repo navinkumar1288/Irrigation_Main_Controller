@@ -184,17 +184,37 @@ void processSMSCommands() {
           response = "SMS alerts disabled";
         }
         // NODE command - send LoRa command
-        else if (cmd.startsWith("NODE ")) {
-          // Format: NODE <id> <command>
-          // Example: NODE 1 STATUS
-          int space1 = cmd.indexOf(' ', 5);
-          if (space1 > 0) {
-            String nodeStr = cmd.substring(5, space1);
-            String nodeCmd = cmd.substring(space1 + 1);
-            int nodeId = nodeStr.toInt();
-            
+        // Supports two formats:
+        // 1. "NODE <id> <command>" - e.g., "NODE 1 PING"
+        // 2. "<id> <command>" - e.g., "1 PING" (same as serial commands)
+        else if (cmd.startsWith("NODE ") || (cmd.length() > 0 && isdigit(cmd.charAt(0)))) {
+          int nodeId = 0;
+          String nodeCmd = "";
+
+          // Parse command format
+          if (cmd.startsWith("NODE ")) {
+            // Format: NODE <id> <command>
+            int space1 = cmd.indexOf(' ', 5);
+            if (space1 > 0) {
+              String nodeStr = cmd.substring(5, space1);
+              nodeCmd = cmd.substring(space1 + 1);
+              nodeId = nodeStr.toInt();
+            }
+          } else {
+            // Format: <id> <command>
+            int space1 = cmd.indexOf(' ');
+            if (space1 > 0) {
+              String nodeStr = cmd.substring(0, space1);
+              nodeCmd = cmd.substring(space1 + 1);
+              nodeId = nodeStr.toInt();
+            }
+          }
+
+          // Execute command if valid
+          if (nodeId > 0 && nodeId <= 255 && nodeCmd.length() > 0) {
             #if ENABLE_LORA
-            if (loraInitialized && nodeId > 0 && nodeId <= 255) {
+            if (loraInitialized) {
+              Serial.println("[SMS] Sending to Node " + String(nodeId) + ": " + nodeCmd);
               bool result = loraComm.sendWithAck(nodeCmd, nodeId, "", 0, 0);
               if (result) {
                 response = "Node " + String(nodeId) + " OK: " + nodeCmd;
@@ -202,18 +222,18 @@ void processSMSCommands() {
                 response = "Node " + String(nodeId) + " TIMEOUT";
               }
             } else {
-              response = "LoRa not available or invalid node";
+              response = "LoRa not available";
             }
             #else
             response = "LoRa disabled";
             #endif
           } else {
-            response = "Format: NODE <id> <cmd>";
+            response = "Format: <id> <cmd> OR NODE <id> <cmd>";
           }
         }
         // HELP command
         else if (cmd == "HELP") {
-          response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, NODE <id> <cmd>, HELP";
+          response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, <id> <cmd> (e.g., 1 PING), HELP";
         }
         // Unknown command
         else {
@@ -416,7 +436,7 @@ void setup() {
   Serial.println("  SCHEDULES - List schedules");
   Serial.println("  STOP - Stop all schedules");
   Serial.println("  SMS ON/OFF - Enable/disable SMS alerts");
-  Serial.println("  NODE <id> <cmd> - Send LoRa command");
+  Serial.println("  <id> <cmd> - Send LoRa command (e.g., 1 PING)");
   Serial.println("  HELP - Show commands");
   Serial.println();
   
