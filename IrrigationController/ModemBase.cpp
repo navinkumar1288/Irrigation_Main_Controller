@@ -1,9 +1,12 @@
 // ModemBase.cpp - Base modem functionality for Quectel EC200U
 #include "ModemBase.h"
 
- HardwareSerial SerialAT(1);  // Use Serial1 for modem
+HardwareSerial SerialAT(1);  // Use Serial1 for modem
 
-ModemBase::ModemBase() : modemReady(false) {
+// Define static member variable (shared across all instances)
+bool ModemBase::modemReady = false;
+
+ModemBase::ModemBase() {
   serial = &SerialAT;
 }
 

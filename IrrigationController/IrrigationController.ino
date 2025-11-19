@@ -333,10 +333,23 @@ void setup() {
   // Initialize Modem (base initialization)
   Serial.println("[7/9] Modem...");
   #if ENABLE_MODEM
+  bool modemInitialized = false;
+
+  // Initialize modem base - use MQTT if enabled, otherwise use SMS
+  #if ENABLE_MQTT
   if (mqtt.init()) {
-    Serial.println("      ✓ Modem initialized");
-    
-    // Configure MQTT
+    Serial.println("      ✓ Modem initialized via MQTT");
+    modemInitialized = true;
+  }
+  #elif ENABLE_SMS
+  if (sms.init()) {
+    Serial.println("      ✓ Modem initialized via SMS");
+    modemInitialized = true;
+  }
+  #endif
+
+  if (modemInitialized) {
+    // Configure MQTT (if enabled and modem initialized via MQTT)
     #if ENABLE_MQTT
     Serial.println("      → Configuring MQTT...");
     if (mqtt.configure()) {
@@ -348,8 +361,8 @@ void setup() {
       Serial.println("      ❌ MQTT configuration failed");
     }
     #endif
-    
-    // Configure SMS
+
+    // Configure SMS (if enabled)
     #if ENABLE_SMS
     Serial.println("      → Configuring SMS...");
     if (sms.configure()) {
