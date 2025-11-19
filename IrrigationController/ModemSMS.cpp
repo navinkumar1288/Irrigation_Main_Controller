@@ -8,33 +8,43 @@ bool ModemSMS::configure() {
     Serial.println("[SMS] ❌ Modem not ready for SMS");
     return false;
   }
-  
+
   Serial.println("[SMS] Configuring...");
-  
+
+  // CRITICAL: Configure Quectel modem to route URCs to UART1 (not USB)
+  // Without this, +CMTI notifications won't be received on the ESP32's UART
+  sendCommand("AT+QURCCFG=\"urcport\",\"uart1\"", 2000);
+  Serial.println("[SMS] ✓ URCs routed to UART1");
+
+  // Configure Ring Indicator for incoming SMS
+  // This enables proper SMS notification signaling
+  sendCommand("AT+QCFG=\"urc/ri/smsincoming\",\"pulse\",120", 2000);
+  Serial.println("[SMS] ✓ SMS RI configured");
+
   // Configure SMS text mode
   if (!configureTextMode()) {
     return false;
   }
-  
+
   // Set SMS storage to SIM card
   String resp = sendCommand("AT+CPMS=\"SM\",\"SM\",\"SM\"", 2000);
   if (resp.indexOf("OK") < 0) {
     Serial.println("[SMS] ⚠ Failed to set storage, trying ME");
     sendCommand("AT+CPMS=\"ME\",\"ME\",\"ME\"", 2000);
   }
-  
+
   // Enable new SMS notification
   // AT+CNMI=<mode>,<mt>,<bm>,<ds>,<bfr>
   // mode=2: buffer URCs in TA when link is reserved
   // mt=1: SMS-DELIVER indications to TE
   sendCommand("AT+CNMI=2,1,0,0,0", 2000);
-  
+
   // Set character set to GSM
   sendCommand("AT+CSCS=\"GSM\"", 2000);
-  
+
   smsReady = true;
   Serial.println("[SMS] ✓ Configuration complete");
-  
+
   return true;
 }
 
