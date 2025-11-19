@@ -101,8 +101,9 @@ bool BLEComm::init() {
 
   server->setCallbacks(new MyServerCallbacks());
 
-  // Set MTU size for better data transfer
-  BLEDevice::setMTU(BLE_MTU_SIZE);
+  // NOTE: MTU negotiation happens automatically during connection.
+  // Do NOT call BLEDevice::setMTU() here - it forces MTU requirements
+  // that many clients cannot meet, causing connection failures.
 
   BLEService *pService = server->createService(SERVICE_UUID);
   if (!pService) {
@@ -156,7 +157,7 @@ bool BLEComm::init() {
   BLEDevice::startAdvertising();
 
   Serial.println("✓ BLE initialized, advertising as: " + String(BLE_DEVICE_NAME));
-  Serial.printf("  MTU: %d bytes\n", BLE_MTU_SIZE);
+  Serial.println("  MTU: Auto-negotiated during connection");
   Serial.println("  Connection interval: No preference (client decides)");
   return true;
 }
