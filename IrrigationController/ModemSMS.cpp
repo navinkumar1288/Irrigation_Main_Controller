@@ -214,15 +214,17 @@ bool ModemSMS::checkNewMessages() {
   if (!smsReady) {
     return false;
   }
-  
+
   // List all unread messages
-  String resp = sendCommand("AT+CMGL=\"REC UNREAD\"", 3000);
-  
+  // Use numeric status (0=unread) instead of string for better compatibility
+  // AT+CMGL=0 works in both text and PDU modes
+  String resp = sendCommand("AT+CMGL=0", 3000);
+
   if (resp.indexOf("+CMGL:") >= 0) {
     Serial.println("[SMS] 📨 New messages detected");
     return true;
   }
-  
+
   return false;
 }
 
@@ -230,18 +232,54 @@ int ModemSMS::getUnreadCount() {
   if (!smsReady) {
     return 0;
   }
-  
-  String resp = sendCommand("AT+CMGL=\"REC UNREAD\"", 3000);
-  
+
+  // Use numeric status (0=unread) for better compatibility
+  String resp = sendCommand("AT+CMGL=0", 3000);
+
   int count = 0;
   int pos = 0;
-  
+
   while ((pos = resp.indexOf("+CMGL:", pos)) >= 0) {
     count++;
     pos += 6;
   }
-  
+
   return count;
+}
+
+std::vector<int> ModemSMS::getUnreadIndices() {
+  std::vector<int> indices;
+
+  if (!smsReady) {
+    return indices;
+  }
+
+  // Use numeric status (0=unread) for better compatibility
+  String resp = sendCommand("AT+CMGL=0", 3000);
+
+  // Parse response to extract message indices
+  // Format: +CMGL: <index>,"<stat>","<oa>",,"<scts>"
+  // Example: +CMGL: 34,"REC UNREAD","+1234567890",,"21/11/17,10:30:45+00"
+  int pos = 0;
+  while ((pos = resp.indexOf("+CMGL:", pos)) >= 0) {
+    // Move past "+CMGL: "
+    pos += 7;
+
+    // Extract index number
+    int commaPos = resp.indexOf(',', pos);
+    if (commaPos > pos) {
+      String indexStr = resp.substring(pos, commaPos);
+      indexStr.trim();
+      int index = indexStr.toInt();
+      if (index > 0) {
+        indices.push_back(index);
+      }
+    }
+
+    pos = commaPos;
+  }
+
+  return indices;
 }
 
 bool ModemSMS::readSMS(int index, SMSMessage &sms) {

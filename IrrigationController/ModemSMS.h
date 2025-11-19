@@ -29,6 +29,7 @@ public:
   bool sendSMS(const String &phoneNumber, const String &message);
   bool checkNewMessages();
   int getUnreadCount();
+  std::vector<int> getUnreadIndices();  // Get list of unread message indices
   bool readSMS(int index, SMSMessage &sms);
   bool deleteSMS(int index);
   bool deleteAllSMS();

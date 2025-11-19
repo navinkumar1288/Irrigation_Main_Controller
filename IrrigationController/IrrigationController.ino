@@ -119,16 +119,17 @@ void sendSMSNotification(const String &message, const String &alertKey = "") {
 void processSMSCommands() {
   #if ENABLE_SMS_COMMANDS
   if (!sms.isReady()) return;
-  
+
   // Check for new messages
   if (sms.checkNewMessages()) {
-    int count = sms.getUnreadCount();
-    Serial.println("[SMS] 📨 " + String(count) + " unread message(s)");
-    
-    // Process each message
-    for (int i = 1; i <= count; i++) {
+    // Get actual message indices (not sequential like 1,2,3 but actual indices like 34,35,etc)
+    std::vector<int> indices = sms.getUnreadIndices();
+    Serial.println("[SMS] 📨 " + String(indices.size()) + " unread message(s)");
+
+    // Process each message by actual index
+    for (int index : indices) {
       SMSMessage msg;
-      if (sms.readSMS(i, msg)) {
+      if (sms.readSMS(index, msg)) {
         Serial.println("\n[SMS] ==================");
         Serial.println("[SMS] From: " + msg.sender);
         Serial.println("[SMS] Time: " + msg.timestamp);
