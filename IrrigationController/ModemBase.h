@@ -8,8 +8,8 @@
 class ModemBase {
 protected:
   HardwareSerial *serial;
-  bool modemReady;
-  
+  static bool modemReady;  // Shared across all modem instances (only one physical modem)
+
   String sendCommand(const String &cmd, uint32_t timeout = 2000);
   void clearSerialBuffer();
 
