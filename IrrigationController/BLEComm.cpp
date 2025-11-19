@@ -7,6 +7,12 @@ class MyServerCallbacks : public BLEServerCallbacks {
     bleComm.setConnected(true);
     Serial.println("[BLE] Client connected");
 
+    // Stop advertising when connected (reduce BLE overhead)
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    if (pAdvertising) {
+      pAdvertising->stop();
+    }
+
     // Request MTU size increase for better throughput
     // Default MTU is 23 bytes, requesting 512 bytes
     delay(100);  // Small delay to let connection stabilize
@@ -134,11 +140,9 @@ bool BLEComm::init() {
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
 
-  // Fix connection interval parameters to prevent immediate disconnection
-  // Using configurable values from Config.h
-  // These values provide good balance between power and responsiveness
-  pAdvertising->setMinPreferred(BLE_MIN_CONN_INTERVAL);
-  pAdvertising->setMaxPreferred(BLE_MAX_CONN_INTERVAL);
+  // CRITICAL: Set to 0x00 (no preference) to let client choose intervals
+  // Forcing specific intervals causes many clients to reject the connection
+  pAdvertising->setMinPreferred(0x00);  // No minimum preference - compatible with all clients
 
   BLEAdvertisementData advData;
   advData.setName(BLE_DEVICE_NAME);
@@ -153,9 +157,7 @@ bool BLEComm::init() {
 
   Serial.println("✓ BLE initialized, advertising as: " + String(BLE_DEVICE_NAME));
   Serial.printf("  MTU: %d bytes\n", BLE_MTU_SIZE);
-  Serial.printf("  Connection interval: %.1f-%.1fms\n",
-                BLE_MIN_CONN_INTERVAL * 1.25,
-                BLE_MAX_CONN_INTERVAL * 1.25);
+  Serial.println("  Connection interval: No preference (client decides)");
   return true;
 }
 
