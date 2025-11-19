@@ -62,6 +62,58 @@ bool ModemBase::init() {
   if (simStatus.indexOf("READY") < 0) {
     Serial.println("[Modem] ❌ SIM not ready!");
     Serial.println("[Modem] Response: " + simStatus);
+
+    // Parse and display CME ERROR code if present
+    int cmePos = simStatus.indexOf("+CME ERROR:");
+    if (cmePos >= 0) {
+      // Extract error code
+      int codeStart = cmePos + 12; // Length of "+CME ERROR: "
+      int codeEnd = simStatus.indexOf("\n", codeStart);
+      if (codeEnd < 0) codeEnd = simStatus.length();
+      String errorCode = simStatus.substring(codeStart, codeEnd);
+      errorCode.trim();
+
+      Serial.println("[Modem] CME Error Code: " + errorCode);
+
+      // Provide helpful error descriptions
+      int code = errorCode.toInt();
+      switch (code) {
+        case 10: Serial.println("[Modem] Error: SIM not inserted"); break;
+        case 11: Serial.println("[Modem] Error: SIM PIN required"); break;
+        case 12: Serial.println("[Modem] Error: SIM PUK required"); break;
+        case 13: Serial.println("[Modem] Error: SIM failure"); break;
+        case 14: Serial.println("[Modem] Error: SIM busy"); break;
+        case 15: Serial.println("[Modem] Error: SIM wrong"); break;
+        case 16: Serial.println("[Modem] Error: Incorrect password"); break;
+        case 17: Serial.println("[Modem] Error: SIM PIN2 required"); break;
+        case 18: Serial.println("[Modem] Error: SIM PUK2 required"); break;
+        case 20: Serial.println("[Modem] Error: Memory full"); break;
+        case 21: Serial.println("[Modem] Error: Invalid index"); break;
+        case 22: Serial.println("[Modem] Error: Not found"); break;
+        case 23: Serial.println("[Modem] Error: Memory failure"); break;
+        case 24: Serial.println("[Modem] Error: Text string too long"); break;
+        case 25: Serial.println("[Modem] Error: Invalid characters in text"); break;
+        case 26: Serial.println("[Modem] Error: Dial string too long"); break;
+        case 27: Serial.println("[Modem] Error: Invalid characters in dial string"); break;
+        case 30: Serial.println("[Modem] Error: No network service"); break;
+        case 31: Serial.println("[Modem] Error: Network timeout"); break;
+        case 32: Serial.println("[Modem] Error: Network not allowed - emergency calls only"); break;
+        case 100: Serial.println("[Modem] Error: Unknown error"); break;
+        default: Serial.println("[Modem] Error: Code " + errorCode); break;
+      }
+
+      // Special guidance for common issues
+      if (code == 10) {
+        Serial.println("[Modem] ℹ Please insert a SIM card and restart");
+      } else if (code == 11) {
+        Serial.println("[Modem] ℹ Use AT+CPIN=<pin> to unlock SIM");
+      } else if (code == 12) {
+        Serial.println("[Modem] ℹ SIM locked! Use AT+CPIN=<puk>,<new_pin> to unlock");
+      } else if (code == 13 || code == 15) {
+        Serial.println("[Modem] ℹ Try reseating the SIM card or use a different SIM");
+      }
+    }
+
     return false;
   }
   Serial.println("[Modem] ✓ SIM ready");
@@ -147,36 +199,46 @@ bool ModemBase::init() {
 
 String ModemBase::sendCommand(const String &cmd, uint32_t timeout) {
   Serial.println("[Modem] TX: " + cmd);
-  
+
   // Clear input buffer
   clearSerialBuffer();
-  
+
   // Send command
   SerialAT.println(cmd);
-  
+
   // Wait for response
   unsigned long start = millis();
   String response = "";
-  
+
   while (millis() - start < timeout) {
     if (SerialAT.available()) {
       char c = SerialAT.read();
       response += c;
-      
-      // Check if we got OK or ERROR
-      if (response.indexOf("OK\r\n") >= 0 || response.indexOf("ERROR") >= 0) {
+
+      // Check if we got OK
+      if (response.indexOf("OK\r\n") >= 0) {
+        break;
+      }
+
+      // Check if we got ERROR - wait a bit more to get the error code
+      if (response.indexOf("ERROR") >= 0) {
+        // Wait to capture complete error message (CME/CMS error codes)
+        delay(200);
+        while (SerialAT.available()) {
+          response += (char)SerialAT.read();
+        }
         break;
       }
     }
     delay(1);
   }
-  
+
   if (response.length() > 0) {
     Serial.println("[Modem] RX: " + response);
   } else {
     Serial.println("[Modem] RX: (timeout)");
   }
-  
+
   return response;
 }
 
