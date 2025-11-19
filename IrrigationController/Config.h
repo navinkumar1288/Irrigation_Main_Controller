@@ -126,12 +126,13 @@
 #define CHARACTERISTIC_UUID_TX "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 // BLE Connection Parameters (units of 1.25ms)
-// NOTE: These values are kept for reference but NOT used in advertising
-// BLE advertising now uses 0x00 (no preference) to maximize client compatibility
-// Forcing specific intervals in advertising causes many clients to reject connections
+// NOTE: These values are kept for reference but NOT used
+// - Connection intervals: BLE advertising uses 0x00 (no preference) for max compatibility
+// - MTU size: Auto-negotiated during connection (not forced at initialization)
+// Forcing specific intervals/MTU causes many clients to reject connections
 #define BLE_MIN_CONN_INTERVAL 0x40  // 80ms (64 * 1.25ms) - reference only
 #define BLE_MAX_CONN_INTERVAL 0xA0  // 200ms (160 * 1.25ms) - reference only
-#define BLE_MTU_SIZE 512            // Maximum Transmission Unit size
+#define BLE_MTU_SIZE 512            // Reference only - actual MTU negotiated per client
 
 // ========== Display Settings ==========
 #define DISPLAY_REFRESH_MS 1000
