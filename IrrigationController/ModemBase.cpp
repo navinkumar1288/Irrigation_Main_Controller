@@ -33,20 +33,27 @@ bool ModemBase::init() {
   
   Serial.println("[Modem] Waiting for boot...");
   delay(5000);  // EC200U takes ~5 seconds to boot
-  
+
   // Start serial communication
   SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
   delay(1000);
-  
-  // Test modem
+
+  // Test modem communication
   Serial.println("[Modem] Testing communication...");
-  for (int i = 0; i < 5; i++) {
+  bool atOk = false;
+  for (int i = 0; i < 10; i++) {
     String resp = sendCommand("AT", 1000);
     if (resp.indexOf("OK") >= 0) {
       Serial.println("[Modem] ✓ Communication OK");
+      atOk = true;
       break;
     }
     delay(1000);
+  }
+
+  if (!atOk) {
+    Serial.println("[Modem] ❌ Communication failed");
+    return false;
   }
   
   // Disable echo
@@ -56,12 +63,44 @@ bool ModemBase::init() {
   String model = sendCommand("ATI", 1000);
   Serial.println("[Modem] Model: " + model);
   
-  // Check SIM card
+  // Check SIM card - retry multiple times as SIM detection can take time
   Serial.println("[Modem] Checking SIM...");
-  String simStatus = sendCommand("AT+CPIN?", 2000);
-  if (simStatus.indexOf("READY") < 0) {
-    Serial.println("[Modem] ❌ SIM not ready!");
-    Serial.println("[Modem] Response: " + simStatus);
+  bool simReady = false;
+  String simStatus = "";
+
+  for (int retry = 0; retry < 15; retry++) {
+    simStatus = sendCommand("AT+CPIN?", 2000);
+
+    if (simStatus.indexOf("READY") >= 0) {
+      simReady = true;
+      Serial.println("[Modem] ✓ SIM ready");
+      break;
+    }
+
+    // Check if it's a temporary error (SIM still initializing)
+    if (simStatus.indexOf("+CME ERROR: 14") >= 0) {
+      // CME ERROR 14 = SIM busy (still initializing)
+      if (retry % 3 == 0) {
+        Serial.print("[Modem] SIM initializing");
+      }
+      Serial.print(".");
+      delay(2000);  // Wait longer for SIM busy
+    } else if (simStatus.indexOf("ERROR") >= 0) {
+      // Other errors - wait a bit and retry
+      if (retry == 0) {
+        Serial.print("[Modem] Waiting for SIM");
+      }
+      Serial.print(".");
+      delay(1000);
+    } else {
+      // No response or unknown - retry
+      delay(1000);
+    }
+  }
+
+  if (!simReady) {
+    Serial.println("\n[Modem] ❌ SIM not ready after 15 attempts!");
+    Serial.println("[Modem] Last response: " + simStatus);
 
     // Parse and display CME ERROR code if present
     int cmePos = simStatus.indexOf("+CME ERROR:");
@@ -82,7 +121,7 @@ bool ModemBase::init() {
         case 11: Serial.println("[Modem] Error: SIM PIN required"); break;
         case 12: Serial.println("[Modem] Error: SIM PUK required"); break;
         case 13: Serial.println("[Modem] Error: SIM failure"); break;
-        case 14: Serial.println("[Modem] Error: SIM busy"); break;
+        case 14: Serial.println("[Modem] Error: SIM busy (timeout waiting)"); break;
         case 15: Serial.println("[Modem] Error: SIM wrong"); break;
         case 16: Serial.println("[Modem] Error: Incorrect password"); break;
         case 17: Serial.println("[Modem] Error: SIM PIN2 required"); break;
@@ -111,12 +150,13 @@ bool ModemBase::init() {
         Serial.println("[Modem] ℹ SIM locked! Use AT+CPIN=<puk>,<new_pin> to unlock");
       } else if (code == 13 || code == 15) {
         Serial.println("[Modem] ℹ Try reseating the SIM card or use a different SIM");
+      } else if (code == 14) {
+        Serial.println("[Modem] ℹ SIM was busy for too long - may be defective");
       }
     }
 
     return false;
   }
-  Serial.println("[Modem] ✓ SIM ready");
   
   // Configure network mode (LTE only for EC200U)
   sendCommand("AT+QCFG=\"nwscanmode\",3,1", 2000);  // LTE only
