@@ -42,6 +42,17 @@ bool ModemSMS::configure() {
   // Set character set to GSM
   sendCommand("AT+CSCS=\"GSM\"", 2000);
 
+  // Check SMSC address - this is CRITICAL for sending SMS
+  String csca = sendCommand("AT+CSCA?", 2000);
+  Serial.println("[SMS] SMSC Check: " + csca);
+  if (csca.indexOf("ERROR") >= 0 || csca.indexOf("\"\"") >= 0 || csca.indexOf("+CSCA: \"\"") >= 0) {
+    Serial.println("[SMS] ⚠ WARNING: SMSC address not configured!");
+    Serial.println("[SMS] ⚠ SMS sending will fail without SMSC!");
+    Serial.println("[SMS] ℹ Get SMSC from your carrier and set with AT+CSCA=\"+number\"");
+  } else {
+    Serial.println("[SMS] ✓ SMSC configured");
+  }
+
   smsReady = true;
   Serial.println("[SMS] ✓ Configuration complete");
 
@@ -95,33 +106,89 @@ bool ModemSMS::sendSMS(const String &phoneNumber, const String &message) {
   unsigned long start = millis();
   String response = "";
   bool success = false;
-  
+  bool errorDetected = false;
+
   while (millis() - start < 30000) {  // 30 second timeout for SMS
     if (SerialAT.available()) {
       char c = SerialAT.read();
       response += c;
-      
+
       // Check for success
       if (response.indexOf("+CMGS:") >= 0 && response.indexOf("OK") >= 0) {
         success = true;
         break;
       }
-      
-      // Check for error
+
+      // Check for error - but keep reading to get the full error code
       if (response.indexOf("ERROR") >= 0) {
+        errorDetected = true;
+        // Wait a bit more to capture the complete error message
+        delay(500);
+        // Read any remaining characters
+        while (SerialAT.available()) {
+          response += (char)SerialAT.read();
+        }
         break;
       }
     }
     delay(10);
   }
-  
+
   Serial.println("[SMS] Response: " + response);
-  
+
   if (success) {
     Serial.println("[SMS] ✓ SMS sent successfully");
     return true;
   } else {
     Serial.println("[SMS] ❌ SMS send failed");
+
+    // Parse and display CMS ERROR code if present
+    if (errorDetected) {
+      int cmsPos = response.indexOf("+CMS ERROR:");
+      if (cmsPos >= 0) {
+        // Extract error code
+        int codeStart = cmsPos + 12; // Length of "+CMS ERROR: "
+        int codeEnd = response.indexOf("\n", codeStart);
+        if (codeEnd < 0) codeEnd = response.length();
+        String errorCode = response.substring(codeStart, codeEnd);
+        errorCode.trim();
+
+        Serial.println("[SMS] CMS Error Code: " + errorCode);
+
+        // Provide helpful error descriptions
+        int code = errorCode.toInt();
+        switch (code) {
+          case 300: Serial.println("[SMS] Error: ME failure"); break;
+          case 301: Serial.println("[SMS] Error: SMS service of ME reserved"); break;
+          case 302: Serial.println("[SMS] Error: Operation not allowed"); break;
+          case 303: Serial.println("[SMS] Error: Operation not supported"); break;
+          case 304: Serial.println("[SMS] Error: Invalid PDU mode parameter"); break;
+          case 305: Serial.println("[SMS] Error: Invalid text mode parameter"); break;
+          case 310: Serial.println("[SMS] Error: SIM not inserted"); break;
+          case 311: Serial.println("[SMS] Error: SIM PIN required"); break;
+          case 312: Serial.println("[SMS] Error: PH-SIM PIN required"); break;
+          case 313: Serial.println("[SMS] Error: SIM failure"); break;
+          case 314: Serial.println("[SMS] Error: SIM busy"); break;
+          case 315: Serial.println("[SMS] Error: SIM wrong"); break;
+          case 316: Serial.println("[SMS] Error: SIM PUK required"); break;
+          case 317: Serial.println("[SMS] Error: SIM PIN2 required"); break;
+          case 318: Serial.println("[SMS] Error: SIM PUK2 required"); break;
+          case 320: Serial.println("[SMS] Error: Memory failure"); break;
+          case 321: Serial.println("[SMS] Error: Invalid memory index"); break;
+          case 322: Serial.println("[SMS] Error: Memory full"); break;
+          case 330: Serial.println("[SMS] Error: SMSC address unknown"); break;
+          case 331: Serial.println("[SMS] Error: No network service"); break;
+          case 332: Serial.println("[SMS] Error: Network timeout"); break;
+          case 340: Serial.println("[SMS] Error: No +CNMA acknowledgement expected"); break;
+          case 500: Serial.println("[SMS] Error: Unknown error"); break;
+          default: Serial.println("[SMS] Error: Code " + errorCode); break;
+        }
+      } else {
+        // Generic error without CMS code
+        Serial.println("[SMS] Error: Generic modem error (check AT command syntax)");
+      }
+    }
+
     return false;
   }
 }
@@ -284,6 +351,57 @@ bool ModemSMS::deleteAllSMS() {
 
 bool ModemSMS::isReady() {
   return smsReady;
+}
+
+void ModemSMS::printSMSDiagnostics() {
+  Serial.println("\n[SMS] === SMS Diagnostics ===");
+
+  // Check SMS ready status
+  Serial.println("[SMS] SMS Ready: " + String(smsReady ? "Yes" : "No"));
+
+  if (!modemReady) {
+    Serial.println("[SMS] ⚠ Modem not ready - cannot run diagnostics");
+    return;
+  }
+
+  // Check network registration
+  String creg = sendCommand("AT+CREG?", 2000);
+  Serial.println("[SMS] Network Registration: " + creg);
+
+  // Check signal quality
+  String csq = sendCommand("AT+CSQ", 2000);
+  Serial.println("[SMS] Signal Quality: " + csq);
+
+  // Check SMS format
+  String cmgf = sendCommand("AT+CMGF?", 2000);
+  Serial.println("[SMS] SMS Format: " + cmgf);
+
+  // Check SMS storage
+  String cpms = sendCommand("AT+CPMS?", 2000);
+  Serial.println("[SMS] Storage: " + cpms);
+
+  // Check SMSC (SMS Center) address
+  String csca = sendCommand("AT+CSCA?", 2000);
+  Serial.println("[SMS] SMSC Address: " + csca);
+  if (csca.indexOf("ERROR") >= 0 || csca.indexOf("\"\"") >= 0) {
+    Serial.println("[SMS] ⚠ SMSC not configured! This is likely the problem.");
+    Serial.println("[SMS] To fix: Get SMSC number from your carrier and set with:");
+    Serial.println("[SMS]   AT+CSCA=\"+<carrier_smsc_number>\"");
+  }
+
+  // Check character set
+  String cscs = sendCommand("AT+CSCS?", 2000);
+  Serial.println("[SMS] Character Set: " + cscs);
+
+  // Check URC configuration
+  String qurccfg = sendCommand("AT+QURCCFG=\"urcport\"", 2000);
+  Serial.println("[SMS] URC Port Config: " + qurccfg);
+
+  // Check SMS notification settings
+  String cnmi = sendCommand("AT+CNMI?", 2000);
+  Serial.println("[SMS] SMS Notification: " + cnmi);
+
+  Serial.println("[SMS] === End Diagnostics ===\n");
 }
 
 void ModemSMS::processBackground() {

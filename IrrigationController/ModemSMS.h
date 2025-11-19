@@ -34,6 +34,7 @@ public:
   bool deleteAllSMS();
   void processBackground();  // Override base class method
   bool isReady();
+  void printSMSDiagnostics();  // Print SMS configuration and status
 };
 
 extern ModemSMS modemSMS;
