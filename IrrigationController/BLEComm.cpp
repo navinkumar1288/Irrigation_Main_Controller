@@ -13,9 +13,7 @@ class MyServerCallbacks : public BLEServerCallbacks {
       pAdvertising->stop();
     }
 
-    // Request MTU size increase for better throughput
-    // Default MTU is 23 bytes, requesting 512 bytes
-    delay(100);  // Small delay to let connection stabilize
+    // Note: MTU negotiation happens automatically - no manual intervention needed
     Serial.println("[BLE] Connection established, MTU negotiation in progress");
   }
 
@@ -148,6 +146,11 @@ bool BLEComm::init() {
   BLEAdvertisementData advData;
   advData.setName(BLE_DEVICE_NAME);
   advData.setFlags(0x06);  // General discoverable, BR/EDR not supported
+
+  // Add manufacturer data (improves device recognition on some clients)
+  String mfr = String("\x01\x02\x03\x04");
+  advData.setManufacturerData(mfr);
+
   pAdvertising->setAdvertisementData(advData);
 
   BLEAdvertisementData scanResp;
