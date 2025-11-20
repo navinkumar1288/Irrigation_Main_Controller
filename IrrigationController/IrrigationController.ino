@@ -411,7 +411,21 @@ void setup() {
   #endif
 
   if (modemInitialized) {
-    // Configure MQTT (if enabled and modem initialized via MQTT)
+    // Configure SMS FIRST (if enabled)
+    // SMS configuration is fast and critical for receiving commands
+    // Must happen before MQTT to avoid losing SMS during MQTT setup delays
+    #if ENABLE_SMS
+    Serial.println("      → Configuring SMS...");
+    if (sms.configure()) {
+      Serial.println("      ✓ SMS configured");
+    } else {
+      Serial.println("      ❌ SMS configuration failed");
+    }
+    #endif
+
+    // Configure MQTT SECOND (if enabled and modem initialized via MQTT)
+    // MQTT takes longer due to network/broker connection
+    // SMS URCs arriving during MQTT setup will be forwarded to SMS handler
     #if ENABLE_MQTT
     Serial.println("      → Configuring MQTT...");
     if (mqtt.configure()) {
@@ -421,16 +435,6 @@ void setup() {
       Serial.println("      ✓ Subscribed to commands");
     } else {
       Serial.println("      ❌ MQTT configuration failed");
-    }
-    #endif
-
-    // Configure SMS (if enabled)
-    #if ENABLE_SMS
-    Serial.println("      → Configuring SMS...");
-    if (sms.configure()) {
-      Serial.println("      ✓ SMS configured");
-    } else {
-      Serial.println("      ❌ SMS configuration failed");
     }
     #endif
   } else {
