@@ -26,6 +26,7 @@ private:
   bool configureTextMode();
   bool isValidPhoneNumber(const String &phoneNumber);
   void handleNewMessageURC(int index);  // Handle +CMTI URC
+  void processURC(const String& urc);  // Process a single URC (from buffer or serial)
 
 public:
   ModemSMS();

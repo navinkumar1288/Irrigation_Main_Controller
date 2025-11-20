@@ -1,5 +1,6 @@
 // ModemSMS.cpp - SMS communication for Quectel EC200U
 #include "ModemSMS.h"
+#include "ModemMQTT.h"  // For accessing shared URC buffer
 
 ModemSMS::ModemSMS() : smsReady(false), needsReconfigure(false), lastSMSCheck(0), smsCheckInterval(10000) {
   pendingMessageIndices.clear();
@@ -514,54 +515,72 @@ void ModemSMS::processBackground() {
   // Process SMS-specific URCs
   // Note: Don't call ModemBase::processBackground() because it consumes
   // all SerialAT data, leaving nothing for us to process!
+
+  // FIRST: Process any URCs forwarded from MQTT handler
+  std::vector<String>& sharedBuffer = ModemMQTT::getSharedURCBuffer();
+  while (!sharedBuffer.empty()) {
+    String urc = sharedBuffer.front();
+    sharedBuffer.erase(sharedBuffer.begin());  // Remove from buffer
+
+    if (urc.length() > 0) {
+      Serial.println("[SMS] Processing buffered URC: " + urc);
+      processURC(urc);  // Process the buffered URC
+    }
+  }
+
+  // SECOND: Process new URCs from serial
   while (SerialAT.available()) {
     String urc = SerialAT.readStringUntil('\n');
     urc.trim();
 
     if (urc.length() > 0) {
       Serial.println("[SMS] URC: " + urc);
+      processURC(urc);  // Process the new URC
+    }
+  }
+}
 
-      // Handle modem restart/reboot
-      // When modem restarts, all configuration is lost (including text mode)
-      if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
-        Serial.println("[SMS] ⚠ Modem restart detected!");
+// Helper function to process a single URC
+void ModemSMS::processURC(const String& urc) {
+  // Handle modem restart/reboot
+  // When modem restarts, all configuration is lost (including text mode)
+  if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
+    Serial.println("[SMS] ⚠ Modem restart detected!");
 
-        // Reset state and mark for reconfiguration
-        smsReady = false;
-        needsReconfigure = true;
+    // Reset state and mark for reconfiguration
+    smsReady = false;
+    needsReconfigure = true;
 
-        Serial.println("[SMS] → SMS marked for reconfiguration");
-      }
+    Serial.println("[SMS] → SMS marked for reconfiguration");
+  }
 
-      // Handle new SMS notification
-      // +CMTI: "SM",<index> or +CMTI: "ME",<index>
-      if (urc.indexOf("+CMTI:") >= 0) {
-        Serial.println("[SMS] 📨 New SMS received!");
+  // Handle new SMS notification
+  // +CMTI: "SM",<index> or +CMTI: "ME",<index>
+  if (urc.indexOf("+CMTI:") >= 0) {
+    Serial.println("[SMS] 📨 New SMS received!");
 
-        // Extract index
-        int indexPos = urc.lastIndexOf(",");
-        if (indexPos >= 0) {
-          String indexStr = urc.substring(indexPos + 1);
-          indexStr.trim();
-          int index = indexStr.toInt();
+    // Extract index
+    int indexPos = urc.lastIndexOf(",");
+    if (indexPos >= 0) {
+      String indexStr = urc.substring(indexPos + 1);
+      indexStr.trim();
+      int index = indexStr.toInt();
 
-          if (index > 0) {
-            // Add to pending queue for processing by main loop
-            handleNewMessageURC(index);
-          }
-        }
-      }
-
-      // Handle SMS delivery report
-      if (urc.indexOf("+CDS:") >= 0) {
-        Serial.println("[SMS] 📬 Delivery report received");
-      }
-
-      // Handle SMS send acknowledgement
-      if (urc.indexOf("+CMGS:") >= 0) {
-        Serial.println("[SMS] ✓ SMS send acknowledged");
+      if (index > 0) {
+        // Add to pending queue for processing by main loop
+        handleNewMessageURC(index);
       }
     }
+  }
+
+  // Handle SMS delivery report
+  if (urc.indexOf("+CDS:") >= 0) {
+    Serial.println("[SMS] 📬 Delivery report received");
+  }
+
+  // Handle SMS send acknowledgement
+  if (urc.indexOf("+CMGS:") >= 0) {
+    Serial.println("[SMS] ✓ SMS send acknowledged");
   }
 }
 
