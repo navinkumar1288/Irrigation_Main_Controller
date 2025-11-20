@@ -484,11 +484,33 @@ void loop() {
   // Process MQTT background (handles auto-reconnect, URCs)
   #if ENABLE_MQTT
   mqtt.processBackground();
+
+  // Check if MQTT needs reconfiguration after modem restart
+  if (mqtt.needsReconfiguration()) {
+    Serial.println("[Main] ⚠ MQTT needs reconfiguration, waiting for modem...");
+    delay(3000);  // Wait for modem to be fully ready
+    if (mqtt.configure()) {
+      Serial.println("[Main] ✓ MQTT reconfigured successfully");
+    } else {
+      Serial.println("[Main] ❌ MQTT reconfiguration failed");
+    }
+  }
   #endif
-  
+
   // Process SMS background (handles new messages, URCs)
   #if ENABLE_SMS
   sms.processBackground();
+
+  // Check if SMS needs reconfiguration after modem restart
+  if (sms.needsReconfiguration()) {
+    Serial.println("[Main] ⚠ SMS needs reconfiguration, waiting for modem...");
+    delay(3000);  // Wait for modem to be fully ready
+    if (sms.configure()) {
+      Serial.println("[Main] ✓ SMS reconfigured successfully");
+    } else {
+      Serial.println("[Main] ❌ SMS reconfiguration failed");
+    }
+  }
   #endif
   
   // Check and process SMS commands periodically

@@ -16,6 +16,7 @@ struct SMSMessage {
 class ModemSMS : public ModemBase {
 private:
   bool smsReady;
+  bool needsReconfigure;
   unsigned long lastSMSCheck;
   unsigned long smsCheckInterval;
   std::vector<int> pendingMessageIndices;  // Queue of unread message indices from URCs
@@ -38,6 +39,7 @@ public:
   bool deleteAllSMS();
   void processBackground();  // Override base class method
   bool isReady();
+  bool needsReconfiguration();  // Check if reconfiguration is needed after modem restart
   void printSMSDiagnostics();  // Print SMS configuration and status
 };
 

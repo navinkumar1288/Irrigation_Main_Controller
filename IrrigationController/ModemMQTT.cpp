@@ -1,7 +1,7 @@
 // ModemMQTT.cpp - MQTT communication for Quectel EC200U
 #include "ModemMQTT.h"
 
-ModemMQTT::ModemMQTT() : mqttConnected(false), lastMqttCheck(0), mqttCheckInterval(30000) {}
+ModemMQTT::ModemMQTT() : mqttConnected(false), needsReconfigure(false), lastMqttCheck(0), mqttCheckInterval(30000) {}
 
 // Escape quotes and backslashes in strings for AT commands
 String ModemMQTT::escapeATString(const String &input) {
@@ -51,8 +51,9 @@ bool ModemMQTT::configure() {
   }
   
   mqttConnected = true;
+  needsReconfigure = false;  // Clear reconfiguration flag
   Serial.println("[MQTT] ✓ Connected and ready");
-  
+
   return true;
 }
 
@@ -186,6 +187,18 @@ void ModemMQTT::processBackground() {
     if (urc.length() > 0) {
       Serial.println("[MQTT] URC: " + urc);
 
+      // Handle modem restart/reboot
+      // When modem restarts, all configuration is lost (including MQTT)
+      if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
+        Serial.println("[MQTT] ⚠ Modem restart detected!");
+
+        // Reset state and mark for reconfiguration
+        mqttConnected = false;
+        needsReconfigure = true;
+
+        Serial.println("[MQTT] → MQTT marked for reconfiguration");
+      }
+
       // Handle MQTT disconnection
       // +QMTSTAT: <client_idx>,<err_code>
       if (urc.indexOf("+QMTSTAT") >= 0) {
@@ -233,4 +246,8 @@ void ModemMQTT::processBackground() {
       reconnect();
     }
   }
+}
+
+bool ModemMQTT::needsReconfiguration() {
+  return needsReconfigure;
 }
