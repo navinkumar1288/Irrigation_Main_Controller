@@ -357,27 +357,50 @@ bool ModemSMS::readSMS(int index, SMSMessage &sms) {
 String ModemSMS::readSMSByIndex(int index, String &sender, String &timestamp) {
   String cmd = "AT+CMGR=" + String(index);
   String resp = sendCommand(cmd, 3000);
-  
+
   // Parse response
-  // +CMGR: "REC UNREAD","+1234567890","","21/11/17,10:30:45+00"
-  // Message text here
-  
+  // TEXT MODE: +CMGR: "REC UNREAD","+1234567890","","21/11/17,10:30:45+00"
+  //           Message text here
+  // PDU MODE:  +CMGR: 0,,29
+  //           0791198904109116...
+
   int cmgrPos = resp.indexOf("+CMGR:");
   if (cmgrPos < 0) {
     Serial.println("[SMS] ❌ Failed to read SMS");
     return "";
   }
-  
+
+  // Check if response is in PDU mode (no quotes after +CMGR:)
+  // PDU format: "+CMGR: 0,,29" or "+CMGR: 1,,29"
+  // Text format: "+CMGR: "REC UNREAD",..."
+  int firstQuoteCheck = resp.indexOf("\"", cmgrPos + 7);
+  int firstCommaCheck = resp.indexOf(",", cmgrPos + 7);
+
+  if (firstCommaCheck >= 0 && (firstQuoteCheck < 0 || firstCommaCheck < firstQuoteCheck)) {
+    // This is PDU mode - modem lost text mode configuration!
+    Serial.println("[SMS] ⚠ WARNING: Message in PDU mode!");
+    Serial.println("[SMS] ⚠ This means modem restarted and lost text mode config");
+    Serial.println("[SMS] → Triggering SMS reconfiguration...");
+
+    // Mark for reconfiguration
+    smsReady = false;
+    needsReconfigure = true;
+
+    // Don't try to parse PDU format - message will be retried after reconfiguration
+    Serial.println("[SMS] ℹ Message will be processed after reconfiguration");
+    return "";
+  }
+
   // Extract sender (phone number)
   int firstQuote = resp.indexOf("\"", cmgrPos + 7);
   int secondQuote = resp.indexOf("\"", firstQuote + 1);
   int thirdQuote = resp.indexOf("\"", secondQuote + 1);
   int fourthQuote = resp.indexOf("\"", thirdQuote + 1);
-  
+
   if (firstQuote >= 0 && secondQuote >= 0 && thirdQuote >= 0 && fourthQuote >= 0) {
     sender = resp.substring(thirdQuote + 1, fourthQuote);
   }
-  
+
   // Extract timestamp
   int fifthQuote = resp.indexOf("\"", fourthQuote + 1);
   int sixthQuote = resp.indexOf("\"", fifthQuote + 1);
@@ -544,4 +567,17 @@ void ModemSMS::processBackground() {
 
 bool ModemSMS::needsReconfiguration() {
   return needsReconfigure;
+}
+
+void ModemSMS::requeueMessage(int index) {
+  // Re-add message to queue for retry (e.g., after reconfiguration)
+  for (int idx : pendingMessageIndices) {
+    if (idx == index) {
+      Serial.println("[SMS] ℹ Message index " + String(index) + " already in queue");
+      return;  // Already in queue
+    }
+  }
+
+  pendingMessageIndices.push_back(index);
+  Serial.println("[SMS] ♻ Message index " + String(index) + " re-queued for retry");
 }
