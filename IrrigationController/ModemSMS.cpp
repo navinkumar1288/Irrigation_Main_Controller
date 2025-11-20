@@ -1,7 +1,7 @@
 // ModemSMS.cpp - SMS communication for Quectel EC200U
 #include "ModemSMS.h"
 
-ModemSMS::ModemSMS() : smsReady(false), lastSMSCheck(0), smsCheckInterval(10000) {
+ModemSMS::ModemSMS() : smsReady(false), needsReconfigure(false), lastSMSCheck(0), smsCheckInterval(10000) {
   pendingMessageIndices.clear();
 }
 
@@ -56,6 +56,7 @@ bool ModemSMS::configure() {
   }
 
   smsReady = true;
+  needsReconfigure = false;  // Clear reconfiguration flag
   Serial.println("[SMS] ✓ Configuration complete");
 
   return true;
@@ -497,6 +498,18 @@ void ModemSMS::processBackground() {
     if (urc.length() > 0) {
       Serial.println("[SMS] URC: " + urc);
 
+      // Handle modem restart/reboot
+      // When modem restarts, all configuration is lost (including text mode)
+      if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
+        Serial.println("[SMS] ⚠ Modem restart detected!");
+
+        // Reset state and mark for reconfiguration
+        smsReady = false;
+        needsReconfigure = true;
+
+        Serial.println("[SMS] → SMS marked for reconfiguration");
+      }
+
       // Handle new SMS notification
       // +CMTI: "SM",<index> or +CMTI: "ME",<index>
       if (urc.indexOf("+CMTI:") >= 0) {
@@ -527,4 +540,8 @@ void ModemSMS::processBackground() {
       }
     }
   }
+}
+
+bool ModemSMS::needsReconfiguration() {
+  return needsReconfigure;
 }

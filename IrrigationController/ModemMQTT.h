@@ -9,6 +9,7 @@
 class ModemMQTT : public ModemBase {
 private:
   bool mqttConnected;
+  bool needsReconfigure;
   unsigned long lastMqttCheck;
   unsigned long mqttCheckInterval;
 
@@ -24,6 +25,7 @@ public:
   bool isConnected();
   void reconnect();
   void processBackground();  // Override base class method
+  bool needsReconfiguration();  // Check if reconfiguration is needed after modem restart
 };
 
 extern ModemMQTT modemMQTT;
