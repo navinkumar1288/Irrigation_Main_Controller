@@ -219,20 +219,35 @@ void processSMSCommands() {
           if (nodeId > 0 && nodeId <= 255 && nodeCmd.length() > 0) {
             #if ENABLE_LORA
             if (loraInitialized) {
-              Serial.println("[SMS] Sending to Node " + String(nodeId) + ": " + nodeCmd);
+              Serial.println("[SMS] ==================");
+              Serial.println("[SMS] ✓ Command parsed successfully");
+              Serial.println("[SMS]   Node ID: " + String(nodeId));
+              Serial.println("[SMS]   Command: " + nodeCmd);
+              Serial.println("[SMS] → Sending via LoRa...");
+
               bool result = loraComm.sendWithAck(nodeCmd, nodeId, "", 0, 0);
+
               if (result) {
+                Serial.println("[SMS] ✓✓✓ LoRa SUCCESS ✓✓✓");
                 response = "Node " + String(nodeId) + " OK: " + nodeCmd;
               } else {
+                Serial.println("[SMS] ✗✗✗ LoRa TIMEOUT ✗✗✗");
                 response = "Node " + String(nodeId) + " TIMEOUT";
               }
             } else {
+              Serial.println("[SMS] ❌ LoRa NOT initialized!");
+              Serial.println("[SMS]   loraInitialized = false");
               response = "LoRa not available";
             }
             #else
+            Serial.println("[SMS] ❌ LoRa DISABLED in Config.h");
+            Serial.println("[SMS]   ENABLE_LORA is not set");
             response = "LoRa disabled";
             #endif
           } else {
+            Serial.println("[SMS] ❌ Invalid command parameters:");
+            Serial.println("[SMS]   NodeID: " + String(nodeId) + " (valid: 1-255)");
+            Serial.println("[SMS]   Command: '" + nodeCmd + "' (length: " + String(nodeCmd.length()) + ")");
             response = "Format: <id> <cmd> OR NODE <id> <cmd>";
           }
         }
