@@ -3,6 +3,7 @@
 #define MODEM_MQTT_H
 
 #include <Arduino.h>
+#include <vector>
 #include "ModemBase.h"
 #include "Config.h"
 
@@ -26,6 +27,9 @@ public:
   void reconnect();
   void processBackground();  // Override base class method
   bool needsReconfiguration();  // Check if reconfiguration is needed after modem restart
+
+  // Shared URC buffer access for SMS handler
+  static std::vector<String>& getSharedURCBuffer();
 };
 
 extern ModemMQTT modemMQTT;

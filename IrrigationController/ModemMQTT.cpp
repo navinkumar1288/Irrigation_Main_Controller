@@ -1,5 +1,10 @@
 // ModemMQTT.cpp - MQTT communication for Quectel EC200U
 #include "ModemMQTT.h"
+#include <vector>
+
+// Shared URC buffer for forwarding non-MQTT URCs to SMS handler
+// MQTT processBackground() runs first and buffers URCs for SMS
+static std::vector<String> sharedURCBuffer;
 
 ModemMQTT::ModemMQTT() : mqttConnected(false), needsReconfigure(false), lastMqttCheck(0), mqttCheckInterval(30000) {}
 
@@ -185,11 +190,32 @@ void ModemMQTT::processBackground() {
     urc.trim();
 
     if (urc.length() > 0) {
+      // Check if this is an MQTT-related URC
+      bool isMQTTURC = (urc.indexOf("+QMTSTAT") >= 0 ||
+                        urc.indexOf("+QMTRECV") >= 0 ||
+                        urc.indexOf("+QMTPUB") >= 0 ||
+                        urc.indexOf("+QMTSUB") >= 0 ||
+                        urc.indexOf("+QMTOPEN") >= 0 ||
+                        urc.indexOf("+QMTCONN") >= 0 ||
+                        urc.indexOf("+QMTDISC") >= 0);
+
+      // Check if this is a shared URC (modem restart)
+      bool isSharedURC = (urc.indexOf("RDY") >= 0 ||
+                          urc.indexOf("POWERED DOWN") >= 0);
+
+      // If it's not an MQTT or shared URC, buffer it for SMS handler
+      if (!isMQTTURC && !isSharedURC) {
+        Serial.println("[MQTT] Forwarding non-MQTT URC to SMS: " + urc);
+        sharedURCBuffer.push_back(urc);
+        continue;  // Skip processing this URC
+      }
+
+      // Process MQTT and shared URCs
       Serial.println("[MQTT] URC: " + urc);
 
       // Handle modem restart/reboot
       // When modem restarts, all configuration is lost (including MQTT)
-      if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
+      if (isSharedURC) {
         Serial.println("[MQTT] ⚠ Modem restart detected!");
 
         // Reset state and mark for reconfiguration
@@ -197,6 +223,9 @@ void ModemMQTT::processBackground() {
         needsReconfigure = true;
 
         Serial.println("[MQTT] → MQTT marked for reconfiguration");
+
+        // Also forward to SMS handler
+        sharedURCBuffer.push_back(urc);
       }
 
       // Handle MQTT disconnection
@@ -250,4 +279,9 @@ void ModemMQTT::processBackground() {
 
 bool ModemMQTT::needsReconfiguration() {
   return needsReconfigure;
+}
+
+// Provide access to shared URC buffer for SMS handler
+std::vector<String>& ModemMQTT::getSharedURCBuffer() {
+  return sharedURCBuffer;
 }
