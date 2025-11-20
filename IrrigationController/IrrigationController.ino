@@ -508,13 +508,15 @@ void loop() {
   mqtt.processBackground();
 
   // Check if MQTT needs reconfiguration after modem restart
+  // Note: needsReconfiguration() now handles throttling and attempt limiting
   if (mqtt.needsReconfiguration()) {
     Serial.println("[Main] ⚠ MQTT needs reconfiguration, waiting for modem...");
-    delay(3000);  // Wait for modem to be fully ready
+    delay(2000);  // Brief wait for modem to be fully ready
     if (mqtt.configure()) {
       Serial.println("[Main] ✓ MQTT reconfigured successfully");
     } else {
-      Serial.println("[Main] ❌ MQTT reconfiguration failed");
+      Serial.println("[Main] ❌ MQTT reconfiguration failed (will retry with backoff)");
+      // Don't block here - let SMS reconfigure too
     }
   }
   #endif
@@ -524,13 +526,15 @@ void loop() {
   sms.processBackground();
 
   // Check if SMS needs reconfiguration after modem restart
+  // SMS reconfiguration happens independently of MQTT status
   if (sms.needsReconfiguration()) {
     Serial.println("[Main] ⚠ SMS needs reconfiguration, waiting for modem...");
-    delay(3000);  // Wait for modem to be fully ready
+    delay(2000);  // Brief wait for modem to be fully ready
     if (sms.configure()) {
       Serial.println("[Main] ✓ SMS reconfigured successfully");
     } else {
       Serial.println("[Main] ❌ SMS reconfiguration failed");
+      // Don't block here - continue with other tasks
     }
   }
   #endif
