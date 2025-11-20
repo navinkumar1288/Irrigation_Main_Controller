@@ -104,13 +104,17 @@ void sendSMSNotification(const String &message, const String &alertKey = "") {
 
   // Send to configured phone numbers (defined in Config.h)
   #ifdef SMS_ALERT_PHONE_1
-  sms.sendSMS(SMS_ALERT_PHONE_1, message);
-  Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_1));
+  if (String(SMS_ALERT_PHONE_1).length() > 0) {
+    sms.sendSMS(SMS_ALERT_PHONE_1, message);
+    Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_1));
+  }
   #endif
 
   #ifdef SMS_ALERT_PHONE_2
-  sms.sendSMS(SMS_ALERT_PHONE_2, message);
-  Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_2));
+  if (String(SMS_ALERT_PHONE_2).length() > 0) {
+    sms.sendSMS(SMS_ALERT_PHONE_2, message);
+    Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_2));
+  }
   #endif
   #endif
 }

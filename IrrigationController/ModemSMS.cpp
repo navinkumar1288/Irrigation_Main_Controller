@@ -71,12 +71,60 @@ bool ModemSMS::configureTextMode() {
   }
 }
 
+bool ModemSMS::isValidPhoneNumber(const String &phoneNumber) {
+  // Basic validation for phone numbers
+  if (phoneNumber.length() < 7) {
+    return false;  // Too short
+  }
+
+  // Must start with + (international format)
+  if (phoneNumber.charAt(0) != '+') {
+    return false;
+  }
+
+  // Check for obviously invalid patterns like +0987654321
+  // Valid international numbers start with + followed by country code (1-3 digits)
+  // Then area code and number (total should be reasonable length)
+
+  // Count digits (excluding +)
+  int digitCount = 0;
+  for (unsigned int i = 1; i < phoneNumber.length(); i++) {
+    if (isdigit(phoneNumber.charAt(i))) {
+      digitCount++;
+    } else if (phoneNumber.charAt(i) != ' ' && phoneNumber.charAt(i) != '-') {
+      // Invalid character
+      return false;
+    }
+  }
+
+  // Valid phone numbers have 7-15 digits (E.164 standard)
+  if (digitCount < 7 || digitCount > 15) {
+    return false;
+  }
+
+  // Check for obviously fake patterns (all zeros after +, etc.)
+  if (phoneNumber.startsWith("+0000") || phoneNumber.startsWith("+0987")) {
+    Serial.println("[SMS] ⚠ Detected test/invalid number pattern");
+    return false;
+  }
+
+  return true;
+}
+
 bool ModemSMS::sendSMS(const String &phoneNumber, const String &message) {
   if (!smsReady) {
     Serial.println("[SMS] ❌ SMS not ready");
     return false;
   }
-  
+
+  // Validate phone number before attempting to send
+  if (!isValidPhoneNumber(phoneNumber)) {
+    Serial.println("[SMS] ❌ Invalid phone number: " + phoneNumber);
+    Serial.println("[SMS] ℹ Use international format: +<country><area><number>");
+    Serial.println("[SMS] ℹ Example: +919944272647");
+    return false;
+  }
+
   Serial.println("[SMS] Sending to: " + phoneNumber);
   Serial.println("[SMS] Message: " + message);
   
@@ -181,7 +229,32 @@ bool ModemSMS::sendSMS(const String &phoneNumber, const String &message) {
           case 332: Serial.println("[SMS] Error: Network timeout"); break;
           case 340: Serial.println("[SMS] Error: No +CNMA acknowledgement expected"); break;
           case 500: Serial.println("[SMS] Error: Unknown error"); break;
+          case 512: Serial.println("[SMS] Error: User abort"); break;
+          case 513: Serial.println("[SMS] Error: Unable to store"); break;
+          case 514: Serial.println("[SMS] Error: Invalid status"); break;
+          case 515: Serial.println("[SMS] Error: Invalid character in address string"); break;
+          case 516: Serial.println("[SMS] Error: Invalid length"); break;
+          case 517: Serial.println("[SMS] Error: Invalid character in PDU"); break;
+          case 518: Serial.println("[SMS] Error: Invalid parameter"); break;
+          case 519: Serial.println("[SMS] Error: Invalid length or character"); break;
+          case 520: Serial.println("[SMS] Error: Invalid input value"); break;
+          case 521: Serial.println("[SMS] Error: No service center address"); break;
+          case 522: Serial.println("[SMS] Error: Memory failure"); break;
+          case 528: Serial.println("[SMS] Error: Invalid PDU mode"); break;
+          case 529: Serial.println("[SMS] Error: Device busy"); break;
+          case 530: Serial.println("[SMS] Error: Invalid destination address / No phone number"); break;
+          case 531: Serial.println("[SMS] Error: Not supported"); break;
+          case 532: Serial.println("[SMS] Error: Invalid format (text)"); break;
           default: Serial.println("[SMS] Error: Code " + errorCode); break;
+        }
+
+        // Special guidance for common issues
+        if (code == 330 || code == 521) {
+          Serial.println("[SMS] ℹ Get SMSC from carrier: AT+CSCA=\"+number\"");
+        } else if (code == 530) {
+          Serial.println("[SMS] ℹ Check phone number format - use full international format");
+        } else if (code == 331) {
+          Serial.println("[SMS] ℹ Check network registration: AT+CREG?");
         }
       } else {
         // Generic error without CMS code
@@ -215,14 +288,16 @@ bool ModemSMS::checkNewMessages() {
     return false;
   }
 
-  // List all unread messages
-  // Use numeric status (0=unread) instead of string for better compatibility
-  // AT+CMGL=0 works in both text and PDU modes
-  String resp = sendCommand("AT+CMGL=0", 3000);
+  // List ALL messages and filter for unread in the response
+  // "ALL" is the most compatible option across different firmware versions
+  String resp = sendCommand("AT+CMGL=\"ALL\"", 3000);
 
   if (resp.indexOf("+CMGL:") >= 0) {
-    Serial.println("[SMS] 📨 New messages detected");
-    return true;
+    // Check if any are unread
+    if (resp.indexOf("REC UNREAD") >= 0 || resp.indexOf("\"0\"") >= 0) {
+      Serial.println("[SMS] 📨 New messages detected");
+      return true;
+    }
   }
 
   return false;
@@ -233,15 +308,21 @@ int ModemSMS::getUnreadCount() {
     return 0;
   }
 
-  // Use numeric status (0=unread) for better compatibility
-  String resp = sendCommand("AT+CMGL=0", 3000);
+  // List all messages and count unread ones
+  String resp = sendCommand("AT+CMGL=\"ALL\"", 3000);
 
   int count = 0;
   int pos = 0;
 
+  // Count messages with "REC UNREAD" status
   while ((pos = resp.indexOf("+CMGL:", pos)) >= 0) {
-    count++;
-    pos += 6;
+    // Check if this message is unread
+    int lineEnd = resp.indexOf('\n', pos);
+    String line = resp.substring(pos, lineEnd);
+    if (line.indexOf("REC UNREAD") >= 0 || line.indexOf("\"0\"") >= 0) {
+      count++;
+    }
+    pos = lineEnd;
   }
 
   return count;
@@ -254,29 +335,37 @@ std::vector<int> ModemSMS::getUnreadIndices() {
     return indices;
   }
 
-  // Use numeric status (0=unread) for better compatibility
-  String resp = sendCommand("AT+CMGL=0", 3000);
+  // List all messages and extract indices of unread ones
+  String resp = sendCommand("AT+CMGL=\"ALL\"", 3000);
 
-  // Parse response to extract message indices
+  // Parse response to extract message indices of UNREAD messages only
   // Format: +CMGL: <index>,"<stat>","<oa>",,"<scts>"
   // Example: +CMGL: 34,"REC UNREAD","+1234567890",,"21/11/17,10:30:45+00"
   int pos = 0;
   while ((pos = resp.indexOf("+CMGL:", pos)) >= 0) {
-    // Move past "+CMGL: "
-    pos += 7;
+    // Get the full line for this message
+    int lineEnd = resp.indexOf('\n', pos);
+    if (lineEnd < 0) lineEnd = resp.length();
+    String line = resp.substring(pos, lineEnd);
 
-    // Extract index number
-    int commaPos = resp.indexOf(',', pos);
-    if (commaPos > pos) {
-      String indexStr = resp.substring(pos, commaPos);
-      indexStr.trim();
-      int index = indexStr.toInt();
-      if (index > 0) {
-        indices.push_back(index);
+    // Only process if this is an unread message
+    if (line.indexOf("REC UNREAD") >= 0 || line.indexOf("\"0\"") >= 0) {
+      // Move past "+CMGL: "
+      int indexStart = pos + 7;
+
+      // Extract index number
+      int commaPos = resp.indexOf(',', indexStart);
+      if (commaPos > indexStart && commaPos < lineEnd) {
+        String indexStr = resp.substring(indexStart, commaPos);
+        indexStr.trim();
+        int index = indexStr.toInt();
+        if (index > 0) {
+          indices.push_back(index);
+        }
       }
     }
 
-    pos = commaPos;
+    pos = lineEnd;
   }
 
   return indices;
