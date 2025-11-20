@@ -18,11 +18,13 @@ private:
   bool smsReady;
   unsigned long lastSMSCheck;
   unsigned long smsCheckInterval;
+  std::vector<int> pendingMessageIndices;  // Queue of unread message indices from URCs
 
   bool waitForPrompt(char ch, unsigned long timeout = 5000);
   String readSMSByIndex(int index, String &sender, String &timestamp);
   bool configureTextMode();
   bool isValidPhoneNumber(const String &phoneNumber);
+  void handleNewMessageURC(int index);  // Handle +CMTI URC
 
 public:
   ModemSMS();

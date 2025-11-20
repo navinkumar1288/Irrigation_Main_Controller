@@ -1,7 +1,9 @@
 // ModemSMS.cpp - SMS communication for Quectel EC200U
 #include "ModemSMS.h"
 
-ModemSMS::ModemSMS() : smsReady(false), lastSMSCheck(0), smsCheckInterval(10000) {}
+ModemSMS::ModemSMS() : smsReady(false), lastSMSCheck(0), smsCheckInterval(10000) {
+  pendingMessageIndices.clear();
+}
 
 bool ModemSMS::configure() {
   if (!modemReady) {
@@ -283,24 +285,24 @@ bool ModemSMS::waitForPrompt(char ch, unsigned long timeout) {
   return false;
 }
 
+void ModemSMS::handleNewMessageURC(int index) {
+  // Add to pending queue if not already there
+  for (int idx : pendingMessageIndices) {
+    if (idx == index) {
+      return;  // Already in queue
+    }
+  }
+  pendingMessageIndices.push_back(index);
+  Serial.println("[SMS] 📨 New message at index " + String(index) + " added to queue");
+}
+
 bool ModemSMS::checkNewMessages() {
   if (!smsReady) {
     return false;
   }
 
-  // List ALL messages and filter for unread in the response
-  // "ALL" is the most compatible option across different firmware versions
-  String resp = sendCommand("AT+CMGL=\"ALL\"", 3000);
-
-  if (resp.indexOf("+CMGL:") >= 0) {
-    // Check if any are unread
-    if (resp.indexOf("REC UNREAD") >= 0 || resp.indexOf("\"0\"") >= 0) {
-      Serial.println("[SMS] 📨 New messages detected");
-      return true;
-    }
-  }
-
-  return false;
+  // Check if we have pending messages from URCs
+  return !pendingMessageIndices.empty();
 }
 
 int ModemSMS::getUnreadCount() {
@@ -308,65 +310,18 @@ int ModemSMS::getUnreadCount() {
     return 0;
   }
 
-  // List all messages and count unread ones
-  String resp = sendCommand("AT+CMGL=\"ALL\"", 3000);
-
-  int count = 0;
-  int pos = 0;
-
-  // Count messages with "REC UNREAD" status
-  while ((pos = resp.indexOf("+CMGL:", pos)) >= 0) {
-    // Check if this message is unread
-    int lineEnd = resp.indexOf('\n', pos);
-    String line = resp.substring(pos, lineEnd);
-    if (line.indexOf("REC UNREAD") >= 0 || line.indexOf("\"0\"") >= 0) {
-      count++;
-    }
-    pos = lineEnd;
-  }
-
-  return count;
+  return pendingMessageIndices.size();
 }
 
 std::vector<int> ModemSMS::getUnreadIndices() {
-  std::vector<int> indices;
-
   if (!smsReady) {
-    return indices;
+    std::vector<int> empty;
+    return empty;
   }
 
-  // List all messages and extract indices of unread ones
-  String resp = sendCommand("AT+CMGL=\"ALL\"", 3000);
-
-  // Parse response to extract message indices of UNREAD messages only
-  // Format: +CMGL: <index>,"<stat>","<oa>",,"<scts>"
-  // Example: +CMGL: 34,"REC UNREAD","+1234567890",,"21/11/17,10:30:45+00"
-  int pos = 0;
-  while ((pos = resp.indexOf("+CMGL:", pos)) >= 0) {
-    // Get the full line for this message
-    int lineEnd = resp.indexOf('\n', pos);
-    if (lineEnd < 0) lineEnd = resp.length();
-    String line = resp.substring(pos, lineEnd);
-
-    // Only process if this is an unread message
-    if (line.indexOf("REC UNREAD") >= 0 || line.indexOf("\"0\"") >= 0) {
-      // Move past "+CMGL: "
-      int indexStart = pos + 7;
-
-      // Extract index number
-      int commaPos = resp.indexOf(',', indexStart);
-      if (commaPos > indexStart && commaPos < lineEnd) {
-        String indexStr = resp.substring(indexStart, commaPos);
-        indexStr.trim();
-        int index = indexStr.toInt();
-        if (index > 0) {
-          indices.push_back(index);
-        }
-      }
-    }
-
-    pos = lineEnd;
-  }
+  // Return a copy of pending indices and clear the queue
+  std::vector<int> indices = pendingMessageIndices;
+  pendingMessageIndices.clear();
 
   return indices;
 }
@@ -544,24 +499,20 @@ void ModemSMS::processBackground() {
       Serial.println("[SMS] URC: " + urc);
       
       // Handle new SMS notification
-      // +CMTI: "SM",<index>
+      // +CMTI: "SM",<index> or +CMTI: "ME",<index>
       if (urc.indexOf("+CMTI:") >= 0) {
         Serial.println("[SMS] 📨 New SMS received!");
-        
+
         // Extract index
         int indexPos = urc.lastIndexOf(",");
         if (indexPos >= 0) {
           String indexStr = urc.substring(indexPos + 1);
+          indexStr.trim();
           int index = indexStr.toInt();
-          
-          Serial.println("[SMS] Message index: " + String(index));
-          
-          // You can add a callback mechanism here to handle new messages
-          // For now, just log it
-          SMSMessage sms;
-          if (readSMS(index, sms)) {
-            // Process the message here
-            // e.g., add to queue, trigger action, etc.
+
+          if (index > 0) {
+            // Add to pending queue for processing by main loop
+            handleNewMessageURC(index);
           }
         }
       }
@@ -575,16 +526,6 @@ void ModemSMS::processBackground() {
       if (urc.indexOf("+CMGS:") >= 0) {
         Serial.println("[SMS] ✓ SMS send acknowledged");
       }
-    }
-  }
-  
-  // Periodic check for new messages
-  if (smsReady && (millis() - lastSMSCheck > smsCheckInterval)) {
-    lastSMSCheck = millis();
-    
-    int unreadCount = getUnreadCount();
-    if (unreadCount > 0) {
-      Serial.println("[SMS] 📨 " + String(unreadCount) + " unread message(s)");
     }
   }
 }
