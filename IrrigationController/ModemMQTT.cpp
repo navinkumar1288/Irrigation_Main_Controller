@@ -176,17 +176,16 @@ void ModemMQTT::reconnect() {
 }
 
 void ModemMQTT::processBackground() {
-  // Call base class method first
-  ModemBase::processBackground();
-  
   // Process MQTT-specific URCs
+  // Note: Don't call ModemBase::processBackground() because it consumes
+  // all SerialAT data, leaving nothing for us to process!
   while (SerialAT.available()) {
     String urc = SerialAT.readStringUntil('\n');
     urc.trim();
-    
+
     if (urc.length() > 0) {
       Serial.println("[MQTT] URC: " + urc);
-      
+
       // Handle MQTT disconnection
       // +QMTSTAT: <client_idx>,<err_code>
       if (urc.indexOf("+QMTSTAT") >= 0) {
@@ -196,7 +195,7 @@ void ModemMQTT::processBackground() {
           mqttConnected = false;
         }
       }
-      
+
       // Handle incoming messages
       // +QMTRECV: <client_idx>,<msgID>,"<topic>","<payload>"
       if (urc.indexOf("+QMTRECV") >= 0) {
@@ -204,12 +203,12 @@ void ModemMQTT::processBackground() {
         // Parse and handle message here
         // You can add a callback mechanism if needed
       }
-      
+
       // Handle publish confirmation
       if (urc.indexOf("+QMTPUB") >= 0) {
         Serial.println("[MQTT] ✓ Publish confirmed");
       }
-      
+
       // Handle subscription confirmation
       if (urc.indexOf("+QMTSUB") >= 0) {
         Serial.println("[MQTT] ✓ Subscription confirmed");
