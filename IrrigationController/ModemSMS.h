@@ -40,6 +40,7 @@ public:
   void processBackground();  // Override base class method
   bool isReady();
   bool needsReconfiguration();  // Check if reconfiguration is needed after modem restart
+  void requeueMessage(int index);  // Re-add message to queue for retry
   void printSMSDiagnostics();  // Print SMS configuration and status
 };
 

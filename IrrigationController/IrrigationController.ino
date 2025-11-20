@@ -124,6 +124,13 @@ void processSMSCommands() {
   #if ENABLE_SMS_COMMANDS
   if (!sms.isReady()) return;
 
+  // Don't process messages if reconfiguration is needed (e.g., after modem restart)
+  // This prevents trying to read PDU-mode messages before text mode is restored
+  if (sms.needsReconfiguration()) {
+    Serial.println("[SMS] ⏸ Skipping message processing - reconfiguration pending");
+    return;
+  }
+
   // Check for new messages
   if (sms.checkNewMessages()) {
     // Get actual message indices (not sequential like 1,2,3 but actual indices like 34,35,etc)
@@ -133,6 +140,8 @@ void processSMSCommands() {
     // Process each message by actual index
     for (int index : indices) {
       SMSMessage msg;
+
+      // Try to read the message
       if (sms.readSMS(index, msg)) {
         Serial.println("\n[SMS] ==================");
         Serial.println("[SMS] From: " + msg.sender);
@@ -270,9 +279,22 @@ void processSMSCommands() {
         sms.deleteSMS(msg.index);
         
         Serial.println("[SMS] ==================\n");
-        
+
         // Publish SMS command event
         publishStatus("EVT|SMS_CMD|" + cmd);
+      } else {
+        // Failed to read message (likely PDU mode or other error)
+        Serial.println("[SMS] ⚠ Failed to read message at index " + String(index));
+
+        // If reconfiguration is needed, re-queue for retry after reconfiguration
+        if (sms.needsReconfiguration()) {
+          sms.requeueMessage(index);
+          Serial.println("[SMS] → Message will be retried after reconfiguration");
+        } else {
+          // Unknown error - still try to delete to avoid infinite loop
+          Serial.println("[SMS] ⚠ Deleting unreadable message");
+          sms.deleteSMS(index);
+        }
       }
     }
   }
