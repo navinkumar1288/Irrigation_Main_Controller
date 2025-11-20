@@ -76,41 +76,136 @@ bool ModemMQTT::configure() {
 
 bool ModemMQTT::openMQTTConnection() {
   Serial.println("[MQTT] Opening connection to broker...");
-  
+
   String openCmd = "AT+QMTOPEN=0,\"" + String(MQTT_BROKER) + "\"," + String(MQTT_PORT);
   String openResp = sendCommand(openCmd, 5000);
-  
+
   if (openResp.indexOf("OK") < 0) {
-    Serial.println("[MQTT] ❌ Failed to open connection");
+    Serial.println("[MQTT] ❌ Failed to send open command");
     return false;
   }
-  
-  // Wait for QMTOPEN URC response
-  delay(2000);
-  
-  Serial.println("[MQTT] ✓ Connection opened");
+
+  // Wait for +QMTOPEN URC response (can take 10-15 seconds)
+  // Format: +QMTOPEN: <client_idx>,<result>
+  // result: 0=success, 1=wrong parameter, 2=MQTT ID occupied, 3=failed to activate PDP, 4=failed to parse domain, 5=network disconnected
+  Serial.println("[MQTT] Waiting for +QMTOPEN URC...");
+
+  unsigned long start = millis();
+  bool openSuccess = false;
+
+  while (millis() - start < 20000) {  // Wait up to 20 seconds
+    if (SerialAT.available()) {
+      String urc = SerialAT.readStringUntil('\n');
+      urc.trim();
+
+      if (urc.length() > 0) {
+        Serial.println("[MQTT] URC: " + urc);
+
+        if (urc.indexOf("+QMTOPEN:") >= 0) {
+          // Parse result code
+          int commaPos = urc.lastIndexOf(",");
+          if (commaPos >= 0) {
+            String resultStr = urc.substring(commaPos + 1);
+            resultStr.trim();
+            int result = resultStr.toInt();
+
+            if (result == 0) {
+              Serial.println("[MQTT] ✓ Connection opened successfully");
+              openSuccess = true;
+              break;
+            } else {
+              Serial.println("[MQTT] ❌ Open failed with error code: " + String(result));
+              return false;
+            }
+          }
+        }
+
+        // Forward non-MQTT URCs to SMS handler
+        if (urc.indexOf("+CMTI:") >= 0 || urc.indexOf("+CDS:") >= 0 || urc.indexOf("+CMGS:") >= 0) {
+          Serial.println("[MQTT] Forwarding SMS URC: " + urc);
+          sharedURCBuffer.push_back(urc);
+        }
+      }
+    }
+    delay(100);  // Small delay to prevent tight loop
+  }
+
+  if (!openSuccess) {
+    Serial.println("[MQTT] ❌ Timeout waiting for +QMTOPEN URC");
+    return false;
+  }
+
   return true;
 }
 
 bool ModemMQTT::connectMQTTBroker() {
   Serial.println("[MQTT] Connecting to broker...");
-  
+
   String connectCmd = "AT+QMTCONN=0,\"" + String(MQTT_CLIENT_ID) + "\"";
   if (strlen(MQTT_USER) > 0) {
     connectCmd += ",\"" + String(MQTT_USER) + "\",\"" + String(MQTT_PASS) + "\"";
   }
-  
+
   String connectResp = sendCommand(connectCmd, 5000);
-  
+
   if (connectResp.indexOf("OK") < 0) {
-    Serial.println("[MQTT] ❌ Failed to connect to broker");
+    Serial.println("[MQTT] ❌ Failed to send connect command");
     return false;
   }
-  
-  // Wait for QMTCONN URC response
-  delay(3000);
-  
-  Serial.println("[MQTT] ✓ Broker connected");
+
+  // Wait for +QMTCONN URC response
+  // Format: +QMTCONN: <client_idx>,<result>[,<ret_code>]
+  // result: 0=success, 1=packet retransmit, 2=failed to send, 3=authentication error, 4=server unavailable
+  Serial.println("[MQTT] Waiting for +QMTCONN URC...");
+
+  unsigned long start = millis();
+  bool connectSuccess = false;
+
+  while (millis() - start < 15000) {  // Wait up to 15 seconds
+    if (SerialAT.available()) {
+      String urc = SerialAT.readStringUntil('\n');
+      urc.trim();
+
+      if (urc.length() > 0) {
+        Serial.println("[MQTT] URC: " + urc);
+
+        if (urc.indexOf("+QMTCONN:") >= 0) {
+          // Parse result code
+          // Format: +QMTCONN: 0,0,0 (client, result, ret_code)
+          int firstComma = urc.indexOf(",");
+          int secondComma = urc.indexOf(",", firstComma + 1);
+
+          if (firstComma >= 0 && secondComma >= 0) {
+            String resultStr = urc.substring(firstComma + 1, secondComma);
+            resultStr.trim();
+            int result = resultStr.toInt();
+
+            if (result == 0) {
+              Serial.println("[MQTT] ✓ Broker connected successfully");
+              connectSuccess = true;
+              break;
+            } else {
+              Serial.println("[MQTT] ❌ Connect failed with error code: " + String(result));
+              return false;
+            }
+          }
+        }
+
+        // Forward non-MQTT URCs to SMS handler
+        if (urc.indexOf("+CMTI:") >= 0 || urc.indexOf("+CDS:") >= 0 || urc.indexOf("+CMGS:") >= 0) {
+          Serial.println("[MQTT] Forwarding SMS URC: " + urc);
+          sharedURCBuffer.push_back(urc);
+        }
+      }
+    }
+    delay(100);  // Small delay to prevent tight loop
+  }
+
+  if (!connectSuccess) {
+    Serial.println("[MQTT] ❌ Timeout waiting for +QMTCONN URC");
+    return false;
+  }
+
   return true;
 }
 
