@@ -9,6 +9,7 @@ ModemSMS::ModemSMS() : smsReady(false), needsReconfigure(false), lastSMSCheck(0)
 bool ModemSMS::configure() {
   if (!modemReady) {
     Serial.println("[SMS] ❌ Modem not ready for SMS");
+    needsReconfigure = false;  // Clear flag to prevent infinite loop
     return false;
   }
 
@@ -26,6 +27,7 @@ bool ModemSMS::configure() {
 
   // Configure SMS text mode
   if (!configureTextMode()) {
+    needsReconfigure = false;  // Clear flag even on failure to prevent infinite loop
     return false;
   }
 

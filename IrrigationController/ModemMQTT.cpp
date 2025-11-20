@@ -6,7 +6,7 @@
 // MQTT processBackground() runs first and buffers URCs for SMS
 static std::vector<String> sharedURCBuffer;
 
-ModemMQTT::ModemMQTT() : mqttConnected(false), needsReconfigure(false), lastMqttCheck(0), mqttCheckInterval(30000) {}
+ModemMQTT::ModemMQTT() : mqttConnected(false), needsReconfigure(false), lastMqttCheck(0), mqttCheckInterval(30000), lastReconfigAttempt(0), reconfigAttempts(0) {}
 
 // Escape quotes and backslashes in strings for AT commands
 String ModemMQTT::escapeATString(const String &input) {
@@ -27,36 +27,48 @@ String ModemMQTT::escapeATString(const String &input) {
 bool ModemMQTT::configure() {
   if (!modemReady) {
     Serial.println("[MQTT] ❌ Modem not ready for MQTT");
+    needsReconfigure = false;  // Clear flag to prevent infinite loop
     return false;
   }
-  
+
   Serial.println("[MQTT] Configuring...");
-  
+
+  // IMPORTANT: Clean up any existing MQTT connections first
+  // This is critical after modem restart to clear old state
+  Serial.println("[MQTT] Cleaning up old connections...");
+  sendCommand("AT+QMTDISC=0", 2000);
+  delay(500);
+  sendCommand("AT+QMTCLOSE=0", 2000);
+  delay(500);
+
   // Configure MQTT connection for EC200U
   // AT+QMTCFG="version",<client_idx>,<vsn>
   sendCommand("AT+QMTCFG=\"version\",0,4", 2000);  // MQTT 3.1.1
-  
+
   // Set keep-alive
   sendCommand("AT+QMTCFG=\"keepalive\",0,120", 2000);
-  
+
   // Set clean session
   sendCommand("AT+QMTCFG=\"session\",0,0", 2000);
-  
+
   // Set timeout
   sendCommand("AT+QMTCFG=\"timeout\",0,30,3,0", 2000);
-  
+
   // Open MQTT connection
   if (!openMQTTConnection()) {
+    needsReconfigure = false;  // Clear flag even on failure to prevent infinite loop
     return false;
   }
-  
+
   // Connect to MQTT broker
   if (!connectMQTTBroker()) {
+    needsReconfigure = false;  // Clear flag even on failure to prevent infinite loop
     return false;
   }
-  
+
   mqttConnected = true;
   needsReconfigure = false;  // Clear reconfiguration flag
+  reconfigAttempts = 0;  // Reset attempt counter on success
   Serial.println("[MQTT] ✓ Connected and ready");
 
   return true;
@@ -221,6 +233,7 @@ void ModemMQTT::processBackground() {
         // Reset state and mark for reconfiguration
         mqttConnected = false;
         needsReconfigure = true;
+        reconfigAttempts = 0;  // Reset attempt counter for new modem restart event
 
         Serial.println("[MQTT] → MQTT marked for reconfiguration");
 
@@ -278,7 +291,37 @@ void ModemMQTT::processBackground() {
 }
 
 bool ModemMQTT::needsReconfiguration() {
-  return needsReconfigure;
+  if (!needsReconfigure) {
+    return false;
+  }
+
+  // Throttle reconfiguration attempts - don't try too frequently
+  unsigned long now = millis();
+  unsigned long minInterval = 10000;  // Wait at least 10 seconds between attempts
+
+  // Exponential backoff based on attempt count
+  if (reconfigAttempts > 0) {
+    minInterval = min(60000UL, 10000UL * (1 << min(reconfigAttempts, 3)));  // Cap at 60 seconds
+  }
+
+  if (now - lastReconfigAttempt < minInterval) {
+    return false;  // Too soon, wait longer
+  }
+
+  // Limit reconfiguration attempts to prevent infinite loops
+  if (reconfigAttempts >= 5) {
+    Serial.println("[MQTT] ⚠ Max reconfiguration attempts reached, giving up");
+    needsReconfigure = false;  // Clear flag and give up
+    reconfigAttempts = 0;
+    return false;
+  }
+
+  // Update tracking
+  lastReconfigAttempt = now;
+  reconfigAttempts++;
+
+  Serial.println("[MQTT] Reconfiguration attempt " + String(reconfigAttempts) + "/5");
+  return true;
 }
 
 // Provide access to shared URC buffer for SMS handler

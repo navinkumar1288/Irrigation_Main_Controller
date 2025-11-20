@@ -13,6 +13,8 @@ private:
   bool needsReconfigure;
   unsigned long lastMqttCheck;
   unsigned long mqttCheckInterval;
+  unsigned long lastReconfigAttempt;  // Track last reconfiguration attempt
+  int reconfigAttempts;  // Track consecutive reconfiguration attempts
 
   bool openMQTTConnection();
   bool connectMQTTBroker();
