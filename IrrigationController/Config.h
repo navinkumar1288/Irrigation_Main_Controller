@@ -107,7 +107,7 @@
 
 // ========== SMS Settings ==========
 #define SMS_ALERT_PHONE_1 "+919944272647"
-#define SMS_ALERT_PHONE_2 "+0987654321"
+#define SMS_ALERT_PHONE_2 ""  // Leave empty if not used (was invalid: +0987654321)
 #define DEFAULT_ADMIN_PHONE SMS_ALERT_PHONE_1
 #define DEFAULT_RECOV_TOK "RECOVERY123"
 #define DEFAULT_COUNTRY_CODE "+91"  // Default country code for phone normalization
