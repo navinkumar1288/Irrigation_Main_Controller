@@ -487,17 +487,16 @@ void ModemSMS::printSMSDiagnostics() {
 }
 
 void ModemSMS::processBackground() {
-  // Call base class method first
-  ModemBase::processBackground();
-  
   // Process SMS-specific URCs
+  // Note: Don't call ModemBase::processBackground() because it consumes
+  // all SerialAT data, leaving nothing for us to process!
   while (SerialAT.available()) {
     String urc = SerialAT.readStringUntil('\n');
     urc.trim();
-    
+
     if (urc.length() > 0) {
       Serial.println("[SMS] URC: " + urc);
-      
+
       // Handle new SMS notification
       // +CMTI: "SM",<index> or +CMTI: "ME",<index>
       if (urc.indexOf("+CMTI:") >= 0) {
@@ -516,12 +515,12 @@ void ModemSMS::processBackground() {
           }
         }
       }
-      
+
       // Handle SMS delivery report
       if (urc.indexOf("+CDS:") >= 0) {
         Serial.println("[SMS] 📬 Delivery report received");
       }
-      
+
       // Handle SMS send acknowledgement
       if (urc.indexOf("+CMGS:") >= 0) {
         Serial.println("[SMS] ✓ SMS send acknowledged");
