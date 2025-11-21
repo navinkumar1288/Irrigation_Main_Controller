@@ -116,7 +116,7 @@
 #define SMS_ALERT_ON_LOW_BATTERY true
 #define SMS_ALERT_ON_SCHEDULE_FAIL true
 #define SMS_ALERT_ON_COMMAND_FAIL true
-#define SMS_CHECK_INTERVAL_MS 10000  // Check for SMS every 10 seconds
+#define SMS_CHECK_INTERVAL_MS 2000  // Check for SMS every 2 seconds (faster response)
 #define SMS_ALERT_RATE_LIMIT_MS 300000  // Minimum 5 minutes between duplicate alerts
 
 // ========== BLE Settings ==========
