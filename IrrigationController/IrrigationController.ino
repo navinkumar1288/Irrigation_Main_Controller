@@ -131,19 +131,20 @@ void sendSMSNotification(const String &message, const String &alertKey = "") {
 // ========== Process SMS Commands ==========
 void processSMSCommands() {
   #if ENABLE_SMS_COMMANDS
+  Serial.println("[SMS] processSMSCommands() called");
+
   // Add diagnostic - print queue status periodically
   static unsigned long lastDiagnostic = 0;
   if (millis() - lastDiagnostic > 10000) {  // Every 10 seconds
     lastDiagnostic = millis();
     int queuedCount = sms.getUnreadCount();
-    if (queuedCount > 0) {
-      Serial.println("[SMS] 📬 Status: " + String(queuedCount) + " messages queued, SMS Ready: " +
-                     String(sms.isReady() ? "YES" : "NO") + ", Needs Reconfig: " +
-                     String(sms.needsReconfiguration() ? "YES" : "NO"));
-    }
+    Serial.println("[SMS] 📬 Diagnostic: " + String(queuedCount) + " messages queued, SMS Ready: " +
+                   String(sms.isReady() ? "YES" : "NO") + ", Needs Reconfig: " +
+                   String(sms.needsReconfiguration() ? "YES" : "NO"));
   }
 
   if (!sms.isReady()) {
+    Serial.println("[SMS] ⚠ SMS not ready - skipping message processing");
     return;  // SMS not ready - messages will wait in queue
   }
 
@@ -155,10 +156,14 @@ void processSMSCommands() {
   }
 
   // Check for new messages
-  if (sms.checkNewMessages()) {
+  Serial.println("[SMS] Checking for new messages...");
+  bool hasNewMessages = sms.checkNewMessages();
+  Serial.println("[SMS] checkNewMessages() returned: " + String(hasNewMessages ? "TRUE" : "FALSE"));
+
+  if (hasNewMessages) {
     // Get actual message indices (not sequential like 1,2,3 but actual indices like 34,35,etc)
     std::vector<int> indices = sms.getUnreadIndices();
-    Serial.println("[SMS] 📨 " + String(indices.size()) + " unread message(s)");
+    Serial.println("[SMS] 📨 Processing " + String(indices.size()) + " unread message(s)");
 
     // Process each message by actual index
     for (int index : indices) {
@@ -530,8 +535,20 @@ void setup() {
 // ========== Main Loop ==========
 unsigned long lastSchedulerCheck = 0;
 unsigned long lastSMSCheck = 0;
+unsigned long lastHeartbeat = 0;  // For debug heartbeat
 
 void loop() {
+  // Debug heartbeat - print every 30 seconds to confirm loop is running
+  if (millis() - lastHeartbeat > 30000) {
+    lastHeartbeat = millis();
+    Serial.println("[Loop] ❤ Heartbeat - Loop running");
+    #if ENABLE_SMS
+    Serial.println("[Loop] SMS Status: Ready=" + String(sms.isReady() ? "YES" : "NO") +
+                   ", Queued=" + String(sms.getUnreadCount()) +
+                   ", NeedsReconfig=" + String(sms.needsReconfiguration() ? "YES" : "NO"));
+    #endif
+  }
+
   // Process LoRa incoming
   #if ENABLE_LORA
   if (loraInitialized) {
@@ -583,6 +600,7 @@ void loop() {
   #if ENABLE_SMS_COMMANDS
   if (millis() - lastSMSCheck > SMS_CHECK_INTERVAL_MS) {  // Configurable interval
     lastSMSCheck = millis();
+    Serial.println("[Loop] → Calling processSMSCommands()");
     processSMSCommands();
   }
   #endif
