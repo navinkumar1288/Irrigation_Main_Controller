@@ -301,27 +301,21 @@ void ModemSMS::handleNewMessageURC(int index) {
 }
 
 bool ModemSMS::checkNewMessages() {
-  if (!smsReady) {
-    return false;
-  }
-
-  // Check if we have pending messages from URCs
+  // Messages can be queued even when SMS is not ready (e.g., during reconfiguration)
+  // Don't check smsReady here - let the caller decide what to do
   return !pendingMessageIndices.empty();
 }
 
 int ModemSMS::getUnreadCount() {
-  if (!smsReady) {
-    return 0;
-  }
-
+  // Return queue size regardless of SMS status
+  // Messages are queued even during reconfiguration
   return pendingMessageIndices.size();
 }
 
 std::vector<int> ModemSMS::getUnreadIndices() {
-  if (!smsReady) {
-    std::vector<int> empty;
-    return empty;
-  }
+  // Return queued messages regardless of SMS status
+  // This allows processing messages as soon as SMS becomes ready
+  // Note: Caller should check smsReady before trying to read messages from modem
 
   // Return a copy of pending indices and clear the queue
   std::vector<int> indices = pendingMessageIndices;

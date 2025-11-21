@@ -122,7 +122,21 @@ void sendSMSNotification(const String &message, const String &alertKey = "") {
 // ========== Process SMS Commands ==========
 void processSMSCommands() {
   #if ENABLE_SMS_COMMANDS
-  if (!sms.isReady()) return;
+  // Add diagnostic - print queue status periodically
+  static unsigned long lastDiagnostic = 0;
+  if (millis() - lastDiagnostic > 10000) {  // Every 10 seconds
+    lastDiagnostic = millis();
+    int queuedCount = sms.getUnreadCount();
+    if (queuedCount > 0) {
+      Serial.println("[SMS] 📬 Status: " + String(queuedCount) + " messages queued, SMS Ready: " +
+                     String(sms.isReady() ? "YES" : "NO") + ", Needs Reconfig: " +
+                     String(sms.needsReconfiguration() ? "YES" : "NO"));
+    }
+  }
+
+  if (!sms.isReady()) {
+    return;  // SMS not ready - messages will wait in queue
+  }
 
   // Don't process messages if reconfiguration is needed (e.g., after modem restart)
   // This prevents trying to read PDU-mode messages before text mode is restored
