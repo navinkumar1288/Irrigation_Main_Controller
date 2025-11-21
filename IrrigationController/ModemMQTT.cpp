@@ -332,6 +332,11 @@ void ModemMQTT::processBackground() {
         inCooldown = false;  // Clear cooldown on modem restart - give MQTT a fresh chance
         cooldownStartTime = 0;
 
+        // CRITICAL: Mark modem as not ready until it fully initializes
+        // Modem sends RDY immediately but takes 5+ seconds to actually be ready
+        modemReady = false;
+        Serial.println("[MQTT] → Modem marked as not ready (waiting for +QIND: SMS DONE)");
+
         Serial.println("[MQTT] → MQTT marked for reconfiguration");
 
         // Also forward to SMS handler

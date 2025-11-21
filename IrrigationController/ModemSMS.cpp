@@ -556,6 +556,14 @@ void ModemSMS::processURC(const String& urc) {
     Serial.println("[SMS] → SMS marked for reconfiguration");
   }
 
+  // Handle modem initialization complete
+  // +QIND: SMS DONE means SMS module is fully initialized and ready
+  if (urc.indexOf("+QIND: SMS DONE") >= 0) {
+    Serial.println("[SMS] ✓ Modem SMS module initialized (+QIND: SMS DONE)");
+    modemReady = true;
+    Serial.println("[SMS] → Modem marked as ready for configuration");
+  }
+
   // Handle new SMS notification
   // +CMTI: "SM",<index> or +CMTI: "ME",<index>
   if (urc.indexOf("+CMTI:") >= 0) {
