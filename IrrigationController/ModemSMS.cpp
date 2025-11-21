@@ -1,6 +1,5 @@
 // ModemSMS.cpp - SMS communication for Quectel EC200U
 #include "ModemSMS.h"
-#include "ModemMQTT.h"  // For accessing shared URC buffer
 
 ModemSMS::ModemSMS() : smsReady(false), needsReconfigure(false), lastSMSCheck(0), smsCheckInterval(10000) {
   pendingMessageIndices.clear();
@@ -508,23 +507,10 @@ void ModemSMS::printSMSDiagnostics() {
 }
 
 void ModemSMS::processBackground() {
-  #if ENABLE_MQTT
-  // MQTT enabled: Process SMS-specific URCs forwarded from MQTT handler
-  // MQTT's processBackground() runs FIRST in main loop and consumes ALL serial data.
-  // It forwards non-MQTT URCs (like +CMTI) to the shared buffer.
-  std::vector<String>& sharedBuffer = ModemMQTT::getSharedURCBuffer();
-  while (!sharedBuffer.empty()) {
-    String urc = sharedBuffer.front();
-    sharedBuffer.erase(sharedBuffer.begin());  // Remove from buffer
+  // SMS works independently - read URCs directly from SerialAT
+  // Note: This function only runs when ENABLE_SMS=1 (i.e., when ENABLE_MQTT=0)
+  // When MQTT is enabled, SMS is disabled and this function is not called
 
-    if (urc.length() > 0) {
-      Serial.println("[SMS] Processing buffered URC: " + urc);
-      processURC(urc);  // Process the buffered URC
-    }
-  }
-  #else
-  // MQTT disabled: Read URCs directly from SerialAT
-  // This is SMS-only mode, so we have direct access to the serial port
   while (SerialAT.available()) {
     String line = SerialAT.readStringUntil('\n');
     line.trim();
@@ -538,7 +524,6 @@ void ModemSMS::processBackground() {
       }
     }
   }
-  #endif
 }
 
 // Helper function to process a single URC
