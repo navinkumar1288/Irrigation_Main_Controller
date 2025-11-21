@@ -515,7 +515,9 @@ void loop() {
   // Note: needsReconfiguration() now handles throttling and attempt limiting
   if (mqtt.needsReconfiguration()) {
     Serial.println("[Main] ⚠ MQTT needs reconfiguration, waiting for modem...");
-    delay(2000);  // Brief wait for modem to be fully ready
+    // Wait for modem to be fully initialized (detected via +QIND: SMS DONE)
+    // This typically takes 5-6 seconds after RDY
+    delay(6000);
     if (mqtt.configure()) {
       Serial.println("[Main] ✓ MQTT reconfigured successfully");
     } else {
@@ -533,7 +535,9 @@ void loop() {
   // SMS reconfiguration happens independently of MQTT status
   if (sms.needsReconfiguration()) {
     Serial.println("[Main] ⚠ SMS needs reconfiguration, waiting for modem...");
-    delay(2000);  // Brief wait for modem to be fully ready
+    // Wait for modem to be fully initialized (detected via +QIND: SMS DONE)
+    // This typically takes 5-6 seconds after RDY
+    delay(6000);
     if (sms.configure()) {
       Serial.println("[Main] ✓ SMS reconfigured successfully");
     } else {
