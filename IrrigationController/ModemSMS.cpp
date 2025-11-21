@@ -546,6 +546,12 @@ void ModemSMS::processURC(const String& urc) {
     Serial.println("[SMS] ✓ Modem SMS module initialized (+QIND: SMS DONE)");
     modemReady = true;
     Serial.println("[SMS] → Modem marked as ready for configuration");
+
+    // If SMS is not ready yet, trigger reconfiguration
+    if (!smsReady) {
+      needsReconfigure = true;
+      Serial.println("[SMS] → SMS needs configuration, marked for reconfiguration");
+    }
   }
 
   // Handle new SMS notification
