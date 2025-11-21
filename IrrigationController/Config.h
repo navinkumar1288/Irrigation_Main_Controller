@@ -10,13 +10,23 @@
 // ========== Feature Enables ==========
 #define ENABLE_LORA 1
 #define ENABLE_MODEM 1
-#define ENABLE_MQTT 1
-#define ENABLE_SMS 1
-#define ENABLE_SMS_COMMANDS 1
-#define ENABLE_SMS_ALERTS 1
+#define ENABLE_MQTT 1          // Set to 0 to use SMS instead
 #define ENABLE_BLE 1
 #define ENABLE_DISPLAY 1
 #define ENABLE_RTC 1
+
+// ========== Conditional Communication Logic ==========
+// If MQTT is enabled, disable SMS (MQTT takes priority)
+// If MQTT is disabled, enable SMS as fallback
+#if ENABLE_MQTT
+  #define ENABLE_SMS 0
+  #define ENABLE_SMS_COMMANDS 0
+  #define ENABLE_SMS_ALERTS 0
+#else
+  #define ENABLE_SMS 1
+  #define ENABLE_SMS_COMMANDS 1
+  #define ENABLE_SMS_ALERTS 1
+#endif
 
 // ========== Buffer Sizes ==========
 #define LORA_BUFFER_SIZE 256
