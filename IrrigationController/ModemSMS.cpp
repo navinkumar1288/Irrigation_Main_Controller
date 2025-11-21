@@ -508,11 +508,10 @@ void ModemSMS::printSMSDiagnostics() {
 }
 
 void ModemSMS::processBackground() {
-  // Process SMS-specific URCs forwarded from MQTT handler
-  // IMPORTANT: MQTT's processBackground() runs FIRST in main loop and consumes
-  // ALL serial data. It forwards non-MQTT URCs (like +CMTI) to the shared buffer.
-  // We ONLY process the shared buffer here - we never read SerialAT directly!
-
+  #if ENABLE_MQTT
+  // MQTT enabled: Process SMS-specific URCs forwarded from MQTT handler
+  // MQTT's processBackground() runs FIRST in main loop and consumes ALL serial data.
+  // It forwards non-MQTT URCs (like +CMTI) to the shared buffer.
   std::vector<String>& sharedBuffer = ModemMQTT::getSharedURCBuffer();
   while (!sharedBuffer.empty()) {
     String urc = sharedBuffer.front();
@@ -523,6 +522,23 @@ void ModemSMS::processBackground() {
       processURC(urc);  // Process the buffered URC
     }
   }
+  #else
+  // MQTT disabled: Read URCs directly from SerialAT
+  // This is SMS-only mode, so we have direct access to the serial port
+  while (SerialAT.available()) {
+    String line = SerialAT.readStringUntil('\n');
+    line.trim();
+
+    if (line.length() > 0) {
+      // Check if it's a URC (not a command response)
+      if (line.startsWith("+") || line.indexOf("RDY") >= 0 ||
+          line.indexOf("POWERED DOWN") >= 0 || line.indexOf("QIND") >= 0) {
+        Serial.println("[SMS] Processing URC: " + line);
+        processURC(line);
+      }
+    }
+  }
+  #endif
 }
 
 // Helper function to process a single URC

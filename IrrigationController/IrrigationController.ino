@@ -75,14 +75,23 @@ bool shouldSendSMSAlert(const String &alertKey) {
 // ========== Status Publishing ==========
 void publishStatus(const String &msg) {
   Serial.println("[Status] " + msg);
-  
+
   #if ENABLE_MQTT
+  // MQTT enabled - publish to MQTT
   if (mqtt.isConnected()) {
     mqtt.publish(MQTT_TOPIC_STATUS, msg);
     Serial.println("[Status] → Published to MQTT");
   }
+  #elif ENABLE_SMS
+  // MQTT disabled, SMS enabled - send important status via SMS
+  // Only send critical events to avoid SMS flooding
+  if (msg.indexOf("EVT|") >= 0 || msg.indexOf("BOOT") >= 0 ||
+      msg.indexOf("ERROR") >= 0 || msg.indexOf("FAIL") >= 0) {
+    sendSMSNotification("Status: " + msg);
+    Serial.println("[Status] → Sent via SMS (MQTT disabled)");
+  }
   #endif
-  
+
   #if ENABLE_BLE
   if (bleComm.isConnected()) {
     bleComm.notify("STAT|" + msg);
@@ -475,8 +484,13 @@ void setup() {
   Serial.println("✓ SETUP COMPLETE");
   Serial.println("========================================");
   Serial.println("LoRa:    " + String(loraInitialized ? "OK" : "FAILED"));
+  #if ENABLE_MQTT
   Serial.println("MQTT:    " + String(mqtt.isConnected() ? "CONNECTED" : "DISCONNECTED"));
+  Serial.println("SMS:     DISABLED (MQTT mode)");
+  #elif ENABLE_SMS
+  Serial.println("MQTT:    DISABLED (SMS mode)");
   Serial.println("SMS:     " + String(sms.isReady() ? "READY" : "NOT READY"));
+  #endif
   Serial.println("========================================\n");
   
   if (loraInitialized) {
@@ -502,11 +516,15 @@ void setup() {
   
   // Publish boot event (important event - keep this)
   publishStatus("EVT|BOOT|OK|V2.0");
-  
-  // Send SMS boot notification
-  sendSMSNotification("Irrigation Controller v2.0 Started. MQTT: " + 
-                      String(mqtt.isConnected() ? "ON" : "OFF") + 
-                      ", LoRa: " + String(loraInitialized ? "ON" : "OFF"));
+
+  // Send boot notification via enabled communication method
+  #if ENABLE_MQTT
+  // MQTT mode - boot notification already sent via publishStatus
+  #elif ENABLE_SMS
+  // SMS mode - send boot notification
+  sendSMSNotification("Irrigation Controller v2.0 Started (SMS Mode). LoRa: " +
+                      String(loraInitialized ? "ON" : "OFF"));
+  #endif
 }
 
 // ========== Main Loop ==========
