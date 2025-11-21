@@ -514,11 +514,11 @@ void ModemSMS::printSMSDiagnostics() {
 }
 
 void ModemSMS::processBackground() {
-  // Process SMS-specific URCs
-  // Note: Don't call ModemBase::processBackground() because it consumes
-  // all SerialAT data, leaving nothing for us to process!
+  // Process SMS-specific URCs forwarded from MQTT handler
+  // IMPORTANT: MQTT's processBackground() runs FIRST in main loop and consumes
+  // ALL serial data. It forwards non-MQTT URCs (like +CMTI) to the shared buffer.
+  // We ONLY process the shared buffer here - we never read SerialAT directly!
 
-  // FIRST: Process any URCs forwarded from MQTT handler
   std::vector<String>& sharedBuffer = ModemMQTT::getSharedURCBuffer();
   while (!sharedBuffer.empty()) {
     String urc = sharedBuffer.front();
@@ -527,17 +527,6 @@ void ModemSMS::processBackground() {
     if (urc.length() > 0) {
       Serial.println("[SMS] Processing buffered URC: " + urc);
       processURC(urc);  // Process the buffered URC
-    }
-  }
-
-  // SECOND: Process new URCs from serial
-  while (SerialAT.available()) {
-    String urc = SerialAT.readStringUntil('\n');
-    urc.trim();
-
-    if (urc.length() > 0) {
-      Serial.println("[SMS] URC: " + urc);
-      processURC(urc);  // Process the new URC
     }
   }
 }
