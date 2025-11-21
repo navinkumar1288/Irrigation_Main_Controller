@@ -6,7 +6,7 @@
 // MQTT processBackground() runs first and buffers URCs for SMS
 static std::vector<String> sharedURCBuffer;
 
-ModemMQTT::ModemMQTT() : mqttConnected(false), needsReconfigure(false), lastMqttCheck(0), mqttCheckInterval(30000), lastReconfigAttempt(0), reconfigAttempts(0) {}
+ModemMQTT::ModemMQTT() : mqttConnected(false), needsReconfigure(false), lastMqttCheck(0), mqttCheckInterval(30000), lastReconfigAttempt(0), reconfigAttempts(0), cooldownStartTime(0), inCooldown(false) {}
 
 // Escape quotes and backslashes in strings for AT commands
 String ModemMQTT::escapeATString(const String &input) {
@@ -329,6 +329,8 @@ void ModemMQTT::processBackground() {
         mqttConnected = false;
         needsReconfigure = true;
         reconfigAttempts = 0;  // Reset attempt counter for new modem restart event
+        inCooldown = false;  // Clear cooldown on modem restart - give MQTT a fresh chance
+        cooldownStartTime = 0;
 
         Serial.println("[MQTT] → MQTT marked for reconfiguration");
 
@@ -374,8 +376,8 @@ void ModemMQTT::processBackground() {
     Serial.println("[MQTT] Connection status check...");
   }
   
-  // Auto-reconnect if disconnected
-  if (!mqttConnected && modemReady) {
+  // Auto-reconnect if disconnected (but not during cooldown period)
+  if (!mqttConnected && modemReady && !inCooldown) {
     static unsigned long lastReconnectAttempt = 0;
     if (millis() - lastReconnectAttempt > 60000) {  // Try every 60 seconds
       lastReconnectAttempt = millis();
@@ -390,24 +392,47 @@ bool ModemMQTT::needsReconfiguration() {
     return false;
   }
 
-  // Throttle reconfiguration attempts - don't try too frequently
   unsigned long now = millis();
-  unsigned long minInterval = 10000;  // Wait at least 10 seconds between attempts
 
-  // Exponential backoff based on attempt count
-  if (reconfigAttempts > 0) {
-    minInterval = min(60000UL, 10000UL * (1 << min(reconfigAttempts, 3)));  // Cap at 60 seconds
+  // Check if we're in 1-hour cooldown period
+  if (inCooldown) {
+    const unsigned long COOLDOWN_DURATION = 3600000;  // 1 hour in milliseconds
+
+    if (now - cooldownStartTime >= COOLDOWN_DURATION) {
+      // Cooldown period ended - reset and try again
+      Serial.println("[MQTT] ⏰ Cooldown period ended (1 hour), will retry connection");
+      inCooldown = false;
+      reconfigAttempts = 0;
+      cooldownStartTime = 0;
+      needsReconfigure = true;  // Re-enable reconfiguration
+    } else {
+      // Still in cooldown - don't try to reconnect
+      unsigned long remainingMinutes = (COOLDOWN_DURATION - (now - cooldownStartTime)) / 60000;
+      if (reconfigAttempts == 0) {  // Only print once to avoid spam
+        Serial.println("[MQTT] ⏸ In cooldown period. Will retry in ~" + String(remainingMinutes) + " minutes");
+        Serial.println("[MQTT] ℹ SMS commands work independently of MQTT");
+        reconfigAttempts = 1;  // Set to 1 to prevent repeated printing
+      }
+      return false;  // Don't try to reconfigure during cooldown
+    }
   }
+
+  // Throttle reconfiguration attempts - don't try too frequently
+  unsigned long minInterval = 10000;  // Wait at least 10 seconds between attempts
 
   if (now - lastReconfigAttempt < minInterval) {
     return false;  // Too soon, wait longer
   }
 
-  // Limit reconfiguration attempts to prevent infinite loops
-  if (reconfigAttempts >= 5) {
-    Serial.println("[MQTT] ⚠ Max reconfiguration attempts reached, giving up");
-    needsReconfigure = false;  // Clear flag and give up
-    reconfigAttempts = 0;
+  // Limit to 3 attempts, then enter 1-hour cooldown
+  if (reconfigAttempts >= 3) {
+    Serial.println("[MQTT] ⚠ Max reconfiguration attempts (3) reached");
+    Serial.println("[MQTT] ⏸ Entering 1-hour cooldown period");
+    Serial.println("[MQTT] ℹ SMS commands will continue to work normally");
+    needsReconfigure = false;  // Clear flag
+    inCooldown = true;
+    cooldownStartTime = now;
+    reconfigAttempts = 0;  // Reset for next time
     return false;
   }
 
@@ -415,7 +440,7 @@ bool ModemMQTT::needsReconfiguration() {
   lastReconfigAttempt = now;
   reconfigAttempts++;
 
-  Serial.println("[MQTT] Reconfiguration attempt " + String(reconfigAttempts) + "/5");
+  Serial.println("[MQTT] Reconfiguration attempt " + String(reconfigAttempts) + "/3");
   return true;
 }
 

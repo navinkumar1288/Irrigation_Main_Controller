@@ -15,6 +15,8 @@ private:
   unsigned long mqttCheckInterval;
   unsigned long lastReconfigAttempt;  // Track last reconfiguration attempt
   int reconfigAttempts;  // Track consecutive reconfiguration attempts
+  unsigned long cooldownStartTime;  // When MQTT entered cooldown after max failures
+  bool inCooldown;  // True when MQTT is in 1-hour cooldown period
 
   bool openMQTTConnection();
   bool connectMQTTBroker();
