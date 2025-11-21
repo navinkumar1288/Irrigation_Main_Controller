@@ -87,7 +87,7 @@ void publishStatus(const String &msg) {
   // Only send critical events to avoid SMS flooding
   if (msg.indexOf("EVT|") >= 0 || msg.indexOf("BOOT") >= 0 ||
       msg.indexOf("ERROR") >= 0 || msg.indexOf("FAIL") >= 0) {
-    sendSMSNotification("Status: " + msg);
+    sendSMSNotification("Status: " + msg, "");
     Serial.println("[Status] → Sent via SMS (MQTT disabled)");
   }
   #endif
@@ -523,7 +523,7 @@ void setup() {
   #elif ENABLE_SMS
   // SMS mode - send boot notification
   sendSMSNotification("Irrigation Controller v2.0 Started (SMS Mode). LoRa: " +
-                      String(loraInitialized ? "ON" : "OFF"));
+                      String(loraInitialized ? "ON" : "OFF"), "");
   #endif
 }
 
@@ -753,13 +753,13 @@ void loop() {
         // Publish schedule load success (important event - keep this)
         publishStatus("EVT|SCH|LOADED");
         // Send SMS notification
-        sendSMSNotification("Schedule loaded successfully");
+        sendSMSNotification("Schedule loaded successfully", "");
       } else {
         Serial.println("[Queue] ✗ Schedule invalid");
         // Publish schedule load failure (important event - keep this)
         publishStatus("ERR|SCH|INVALID");
         // Send SMS alert
-        sendSMSNotification("ERROR: Invalid schedule format");
+        sendSMSNotification("ERROR: Invalid schedule format", "");
       }
     }
     // Unknown
@@ -803,7 +803,7 @@ void loop() {
           publishStatus("EVT|SCH|TRIGGER|S=" + sch.id);
 
           // Send SMS notification
-          sendSMSNotification("Schedule started: " + sch.id);
+          sendSMSNotification("Schedule started: " + sch.id, "");
 
           if (sch.rec == 'O') {
             sch.enabled = false;
