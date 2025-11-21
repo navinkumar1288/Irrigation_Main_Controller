@@ -121,10 +121,9 @@ bool ModemMQTT::openMQTTConnection() {
           }
         }
 
-        // Forward non-MQTT URCs to SMS handler
+        // Ignore non-MQTT URCs (SMS, etc.) - they won't be processed in MQTT mode
         if (urc.indexOf("+CMTI:") >= 0 || urc.indexOf("+CDS:") >= 0 || urc.indexOf("+CMGS:") >= 0) {
-          Serial.println("[MQTT] Forwarding SMS URC: " + urc);
-          sharedURCBuffer.push_back(urc);
+          // SMS URCs ignored in MQTT mode
         }
       }
     }
@@ -192,10 +191,9 @@ bool ModemMQTT::connectMQTTBroker() {
           }
         }
 
-        // Forward non-MQTT URCs to SMS handler
+        // Ignore non-MQTT URCs (SMS, etc.) - they won't be processed in MQTT mode
         if (urc.indexOf("+CMTI:") >= 0 || urc.indexOf("+CDS:") >= 0 || urc.indexOf("+CMGS:") >= 0) {
-          Serial.println("[MQTT] Forwarding SMS URC: " + urc);
-          sharedURCBuffer.push_back(urc);
+          // SMS URCs ignored in MQTT mode
         }
       }
     }
@@ -307,23 +305,29 @@ void ModemMQTT::processBackground() {
                         urc.indexOf("+QMTCONN") >= 0 ||
                         urc.indexOf("+QMTDISC") >= 0);
 
-      // Check if this is a shared URC (modem restart)
+      // Check if this is a shared URC (modem status)
       bool isSharedURC = (urc.indexOf("RDY") >= 0 ||
-                          urc.indexOf("POWERED DOWN") >= 0);
+                          urc.indexOf("POWERED DOWN") >= 0 ||
+                          urc.indexOf("+QIND") >= 0);
 
-      // If it's not an MQTT or shared URC, buffer it for SMS handler
+      // Only process MQTT and shared URCs, ignore everything else
       if (!isMQTTURC && !isSharedURC) {
-        Serial.println("[MQTT] Forwarding non-MQTT URC to SMS: " + urc);
-        sharedURCBuffer.push_back(urc);
+        // Not an MQTT URC - ignore it (SMS-only URC)
         continue;  // Skip processing this URC
       }
 
       // Process MQTT and shared URCs
       Serial.println("[MQTT] URC: " + urc);
 
+      // Handle modem initialization complete
+      if (urc.indexOf("+QIND: SMS DONE") >= 0) {
+        Serial.println("[MQTT] ✓ Modem fully initialized (+QIND: SMS DONE)");
+        modemReady = true;
+      }
+
       // Handle modem restart/reboot
       // When modem restarts, all configuration is lost (including MQTT)
-      if (isSharedURC) {
+      if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
         Serial.println("[MQTT] ⚠ Modem restart detected!");
 
         // Reset state and mark for reconfiguration
@@ -339,9 +343,6 @@ void ModemMQTT::processBackground() {
         Serial.println("[MQTT] → Modem marked as not ready (waiting for +QIND: SMS DONE)");
 
         Serial.println("[MQTT] → MQTT marked for reconfiguration");
-
-        // Also forward to SMS handler
-        sharedURCBuffer.push_back(urc);
       }
 
       // Handle MQTT disconnection
