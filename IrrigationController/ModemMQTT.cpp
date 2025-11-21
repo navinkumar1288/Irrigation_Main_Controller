@@ -27,7 +27,7 @@ String ModemMQTT::escapeATString(const String &input) {
 bool ModemMQTT::configure() {
   if (!modemReady) {
     Serial.println("[MQTT] ❌ Modem not ready for MQTT");
-    needsReconfigure = false;  // Clear flag to prevent infinite loop
+    // Don't clear needsReconfigure - let needsReconfiguration() manage attempts
     return false;
   }
 
@@ -56,19 +56,20 @@ bool ModemMQTT::configure() {
 
   // Open MQTT connection
   if (!openMQTTConnection()) {
-    needsReconfigure = false;  // Clear flag even on failure to prevent infinite loop
+    // Don't clear needsReconfigure - let needsReconfiguration() manage attempts
     return false;
   }
 
   // Connect to MQTT broker
   if (!connectMQTTBroker()) {
-    needsReconfigure = false;  // Clear flag even on failure to prevent infinite loop
+    // Don't clear needsReconfigure - let needsReconfiguration() manage attempts
     return false;
   }
 
   mqttConnected = true;
-  needsReconfigure = false;  // Clear reconfiguration flag
+  needsReconfigure = false;  // Clear flag only on success
   reconfigAttempts = 0;  // Reset attempt counter on success
+  inCooldown = false;  // Clear cooldown on success
   Serial.println("[MQTT] ✓ Connected and ready");
 
   return true;
