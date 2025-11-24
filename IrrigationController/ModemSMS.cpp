@@ -41,7 +41,17 @@ bool ModemSMS::configure() {
   // AT+CNMI=<mode>,<mt>,<bm>,<ds>,<bfr>
   // mode=2: buffer URCs in TA when link is reserved
   // mt=1: SMS-DELIVER indications to TE
-  sendCommand("AT+CNMI=2,1,0,0,0", 2000);
+  String cnmiResp = sendCommand("AT+CNMI=2,1,0,0,0", 2000);
+  if (cnmiResp.indexOf("OK") >= 0) {
+    Serial.println("[SMS] ✓ SMS notifications enabled (AT+CNMI)");
+  } else {
+    Serial.println("[SMS] ❌ Failed to enable SMS notifications!");
+    Serial.println("[SMS] Response: " + cnmiResp);
+  }
+
+  // Verify CNMI settings
+  String cnmiCheck = sendCommand("AT+CNMI?", 2000);
+  Serial.println("[SMS] CNMI Status: " + cnmiCheck);
 
   // Set character set to GSM
   sendCommand("AT+CSCS=\"GSM\"", 2000);
@@ -60,6 +70,12 @@ bool ModemSMS::configure() {
   smsReady = true;
   needsReconfigure = false;  // Clear reconfiguration flag
   Serial.println("[SMS] ✓ Configuration complete");
+
+  // Test: List all messages to see if any exist
+  Serial.println("[SMS] === Diagnostic: Checking for existing messages ===");
+  String listCmd = sendCommand("AT+CMGL=\"ALL\"", 5000);
+  Serial.println("[SMS] Message list: " + listCmd);
+  Serial.println("[SMS] === End diagnostic ===");
 
   return true;
 }
@@ -513,30 +529,44 @@ void ModemSMS::processBackground() {
 
   // Debug: Check serial availability periodically
   static unsigned long lastCheck = 0;
-  if (millis() - lastCheck > 5000) {  // Every 5 seconds
+  bool needsLog = (millis() - lastCheck > 5000);  // Every 5 seconds
+
+  int available = SerialAT.available();
+  if (needsLog) {
     lastCheck = millis();
-    int available = SerialAT.available();
     Serial.println("[SMS] processBackground() - SerialAT.available() = " + String(available) + " bytes");
-    if (available > 0) {
-      Serial.println("[SMS] ✓ Data available in serial buffer!");
-    }
   }
 
-  while (SerialAT.available()) {
-    String line = SerialAT.readStringUntil('\n');
-    line.trim();
+  if (available > 0) {
+    if (needsLog) {
+      Serial.println("[SMS] ✓ Data available in serial buffer! Reading now...");
+    }
 
-    if (line.length() > 0) {
-      Serial.println("[SMS] Read line from SerialAT: '" + line + "'");
+    // Read all available data
+    int linesRead = 0;
+    while (SerialAT.available()) {
+      String line = SerialAT.readStringUntil('\n');
+      line.trim();
 
-      // Check if it's a URC (not a command response)
-      if (line.startsWith("+") || line.indexOf("RDY") >= 0 ||
-          line.indexOf("POWERED DOWN") >= 0 || line.indexOf("QIND") >= 0) {
-        Serial.println("[SMS] Processing URC: " + line);
-        processURC(line);
+      if (line.length() > 0) {
+        linesRead++;
+        Serial.println("[SMS] Line " + String(linesRead) + ": '" + line + "' (len=" + String(line.length()) + ")");
+
+        // Check if it's a URC (not a command response)
+        if (line.startsWith("+") || line.indexOf("RDY") >= 0 ||
+            line.indexOf("POWERED DOWN") >= 0 || line.indexOf("QIND") >= 0) {
+          Serial.println("[SMS] → This is a URC, processing...");
+          processURC(line);
+        } else {
+          Serial.println("[SMS] → Not a URC, ignoring");
+        }
       } else {
-        Serial.println("[SMS] Ignoring non-URC line: " + line);
+        Serial.println("[SMS] Read empty line (after trim)");
       }
+    }
+
+    if (linesRead > 0) {
+      Serial.println("[SMS] Finished reading " + String(linesRead) + " line(s)");
     }
   }
 }
