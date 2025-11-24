@@ -582,6 +582,7 @@ void loop() {
 
   // Check if SMS needs reconfiguration after modem restart
   // SMS reconfiguration happens independently of MQTT status
+  // Note: needsReconfiguration() now handles throttling and attempt limiting
   if (sms.needsReconfiguration()) {
     Serial.println("[Main] ⚠ SMS needs reconfiguration, waiting for modem...");
     // Wait for modem to be fully initialized (detected via +QIND: SMS DONE)
@@ -590,8 +591,8 @@ void loop() {
     if (sms.configure()) {
       Serial.println("[Main] ✓ SMS reconfigured successfully");
     } else {
-      Serial.println("[Main] ❌ SMS reconfiguration failed");
-      // Don't block here - continue with other tasks
+      Serial.println("[Main] ❌ SMS reconfiguration failed (will retry with backoff)");
+      // Don't block here - let SMS needsReconfiguration() manage retries
     }
   }
   #endif

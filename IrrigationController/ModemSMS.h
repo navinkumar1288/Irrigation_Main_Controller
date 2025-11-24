@@ -21,6 +21,12 @@ private:
   unsigned long smsCheckInterval;
   std::vector<int> pendingMessageIndices;  // Queue of unread message indices from URCs
 
+  // Throttling and cooldown for reconfiguration attempts
+  unsigned long lastReconfigAttempt;
+  int reconfigAttempts;
+  unsigned long cooldownStartTime;
+  bool inCooldown;
+
   bool waitForPrompt(char ch, unsigned long timeout = 5000);
   String readSMSByIndex(int index, String &sender, String &timestamp);
   bool configureTextMode();
