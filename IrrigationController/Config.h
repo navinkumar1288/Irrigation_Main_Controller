@@ -10,7 +10,7 @@
 // ========== Feature Enables ==========
 #define ENABLE_LORA 1
 #define ENABLE_MODEM 1
-#define ENABLE_MQTT 1          // Set to 0 to use SMS instead
+#define ENABLE_MQTT 0          // Set to 0 to use SMS instead (SMS MODE ACTIVE)
 #define ENABLE_BLE 1
 #define ENABLE_DISPLAY 1
 #define ENABLE_RTC 1
