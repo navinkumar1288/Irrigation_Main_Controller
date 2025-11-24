@@ -225,6 +225,13 @@ void processSMSCommands() {
           ENABLE_SMS_BROADCAST = false;
           response = "SMS alerts disabled";
         }
+        // CHECK command - manually scan for messages (bypasses URC queue)
+        else if (cmd == "CHECK" || cmd == "REFRESH") {
+          Serial.println("[SMS] Manual message check requested");
+          // Trigger SMS diagnostics to list all messages
+          sms.printSMSDiagnostics();
+          response = "Checking for messages...";
+        }
         // NODE command - send LoRa command
         // Supports two formats:
         // 1. "NODE <id> <command>" - e.g., "NODE 1 PING"
@@ -290,7 +297,7 @@ void processSMSCommands() {
         }
         // HELP command
         else if (cmd == "HELP") {
-          response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, <id> <cmd> (e.g., 1 PING), HELP";
+          response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, CHECK, <id> <cmd> (e.g., 1 PING), HELP";
         }
         // Unknown command
         else {
@@ -515,6 +522,7 @@ void setup() {
   Serial.println("  SCHEDULES - List schedules");
   Serial.println("  STOP - Stop all schedules");
   Serial.println("  SMS ON/OFF - Enable/disable SMS alerts");
+  Serial.println("  CHECK - Manually scan for messages");
   Serial.println("  <id> <cmd> - Send LoRa command (e.g., 1 PING)");
   Serial.println("  HELP - Show commands");
   Serial.println();
@@ -583,15 +591,26 @@ void loop() {
   // Check if SMS needs reconfiguration after modem restart
   // SMS reconfiguration happens independently of MQTT status
   if (sms.needsReconfiguration()) {
-    Serial.println("[Main] ⚠ SMS needs reconfiguration, waiting for modem...");
-    // Wait for modem to be fully initialized (detected via +QIND: SMS DONE)
-    // This typically takes 5-6 seconds after RDY
-    delay(6000);
-    if (sms.configure()) {
-      Serial.println("[Main] ✓ SMS reconfigured successfully");
+    Serial.println("[Main] ⚠ SMS needs reconfiguration");
+
+    // Check if modem is ready (detected via +QIND: SMS DONE)
+    if (!sms.isReady() && !ModemBase::isReady()) {
+      Serial.println("[Main] → Modem not ready yet, waiting for +QIND: SMS DONE...");
+      // Don't configure yet - wait for modem to be ready
+      // needsReconfiguration() will remain true until modem is ready
     } else {
-      Serial.println("[Main] ❌ SMS reconfiguration failed");
-      // Don't block here - continue with other tasks
+      Serial.println("[Main] → Modem ready, configuring SMS...");
+      // Clear any garbage in serial buffer before configuring
+      while (SerialAT.available()) {
+        SerialAT.read();
+      }
+
+      if (sms.configure()) {
+        Serial.println("[Main] ✓ SMS reconfigured successfully");
+      } else {
+        Serial.println("[Main] ❌ SMS reconfiguration failed");
+        // Don't block here - continue with other tasks
+      }
     }
   }
   #endif
