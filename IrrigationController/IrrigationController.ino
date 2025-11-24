@@ -228,9 +228,11 @@ void processSMSCommands() {
         // CHECK command - manually scan for messages (bypasses URC queue)
         else if (cmd == "CHECK" || cmd == "REFRESH") {
           Serial.println("[SMS] Manual message check requested");
-          // Trigger SMS diagnostics to list all messages
+          // Scan for new messages
+          sms.scanForNewMessages();
+          // Also show diagnostics
           sms.printSMSDiagnostics();
-          response = "Checking for messages...";
+          response = "Scanning complete. Check logs.";
         }
         // NODE command - send LoRa command
         // Supports two formats:
@@ -620,7 +622,20 @@ void loop() {
     processSMSCommands();
   }
   #endif
-  
+
+  // Periodically scan for messages (bypasses URC system)
+  // This is a workaround if +CMTI URCs are not being received
+  #if ENABLE_SMS
+  static unsigned long lastMessageScan = 0;
+  if (millis() - lastMessageScan > 30000) {  // Every 30 seconds
+    lastMessageScan = millis();
+    if (sms.isReady()) {
+      Serial.println("[Loop] → Periodic message scan (URC bypass)");
+      sms.scanForNewMessages();
+    }
+  }
+  #endif
+
   // ========== Process Serial Commands ==========
   if (Serial.available()) {
     String line = Serial.readStringUntil('\n');
