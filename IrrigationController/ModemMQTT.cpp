@@ -291,6 +291,15 @@ void ModemMQTT::processBackground() {
   // Process MQTT-specific URCs
   // Note: Don't call ModemBase::processBackground() because it consumes
   // all SerialAT data, leaving nothing for us to process!
+
+  // Debug: Log when MQTT processBackground is called (should only be in MQTT mode)
+  static unsigned long lastMQTTLog = 0;
+  if (millis() - lastMQTTLog > 10000) {  // Every 10 seconds
+    lastMQTTLog = millis();
+    Serial.println("[MQTT] processBackground() called - WARNING: Should be disabled in SMS mode!");
+    Serial.println("[MQTT] SerialAT.available() = " + String(SerialAT.available()) + " bytes");
+  }
+
   while (SerialAT.available()) {
     String urc = SerialAT.readStringUntil('\n');
     urc.trim();

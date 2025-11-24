@@ -511,16 +511,31 @@ void ModemSMS::processBackground() {
   // Note: This function only runs when ENABLE_SMS=1 (i.e., when ENABLE_MQTT=0)
   // When MQTT is enabled, SMS is disabled and this function is not called
 
+  // Debug: Check serial availability periodically
+  static unsigned long lastCheck = 0;
+  if (millis() - lastCheck > 5000) {  // Every 5 seconds
+    lastCheck = millis();
+    int available = SerialAT.available();
+    Serial.println("[SMS] processBackground() - SerialAT.available() = " + String(available) + " bytes");
+    if (available > 0) {
+      Serial.println("[SMS] ✓ Data available in serial buffer!");
+    }
+  }
+
   while (SerialAT.available()) {
     String line = SerialAT.readStringUntil('\n');
     line.trim();
 
     if (line.length() > 0) {
+      Serial.println("[SMS] Read line from SerialAT: '" + line + "'");
+
       // Check if it's a URC (not a command response)
       if (line.startsWith("+") || line.indexOf("RDY") >= 0 ||
           line.indexOf("POWERED DOWN") >= 0 || line.indexOf("QIND") >= 0) {
         Serial.println("[SMS] Processing URC: " + line);
         processURC(line);
+      } else {
+        Serial.println("[SMS] Ignoring non-URC line: " + line);
       }
     }
   }
