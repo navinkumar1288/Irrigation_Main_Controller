@@ -580,9 +580,14 @@ void ModemSMS::processURC(const String& urc) {
 
     // Reset state and mark for reconfiguration
     smsReady = false;
-    needsReconfigure = true;
+    modemReady = false;  // Mark modem as not ready until +QIND: SMS DONE
+    needsReconfigure = false;  // Don't reconfigure yet - wait for modem to be ready
 
-    Serial.println("[SMS] → SMS marked for reconfiguration");
+    // Clear serial buffer to remove any garbage data
+    Serial.println("[SMS] → Clearing serial buffer...");
+    clearSerialBuffer();
+
+    Serial.println("[SMS] → Waiting for modem initialization (+QIND: SMS DONE)");
   }
 
   // Handle modem initialization complete
