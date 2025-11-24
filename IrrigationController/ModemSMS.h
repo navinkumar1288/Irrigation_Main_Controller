@@ -43,6 +43,7 @@ public:
   bool needsReconfiguration();  // Check if reconfiguration is needed after modem restart
   void requeueMessage(int index);  // Re-add message to queue for retry
   void printSMSDiagnostics();  // Print SMS configuration and status
+  void scanForNewMessages();  // Actively poll modem for new messages (bypasses URCs)
 };
 
 extern ModemSMS modemSMS;

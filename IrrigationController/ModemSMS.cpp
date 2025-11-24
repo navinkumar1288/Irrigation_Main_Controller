@@ -522,6 +522,51 @@ void ModemSMS::printSMSDiagnostics() {
   Serial.println("[SMS] === End Diagnostics ===\n");
 }
 
+void ModemSMS::scanForNewMessages() {
+  if (!smsReady) {
+    Serial.println("[SMS] Cannot scan - SMS not ready");
+    return;
+  }
+
+  Serial.println("[SMS] === Scanning for new messages (bypassing URCs) ===");
+
+  // Use AT+CMGL to list all unread messages
+  String listCmd = sendCommand("AT+CMGL=\"REC UNREAD\"", 5000);
+
+  if (listCmd.indexOf("+CMGL:") >= 0) {
+    Serial.println("[SMS] Found unread messages:");
+    Serial.println(listCmd);
+
+    // Parse message indices from +CMGL response
+    // Format: +CMGL: <index>,"REC UNREAD","+1234567890","","21/11/17,10:30:45+00"
+    int startPos = 0;
+    while (true) {
+      int cmglPos = listCmd.indexOf("+CMGL: ", startPos);
+      if (cmglPos < 0) break;
+
+      // Extract index number
+      int commaPos = listCmd.indexOf(",", cmglPos);
+      if (commaPos > cmglPos) {
+        String indexStr = listCmd.substring(cmglPos + 7, commaPos);
+        indexStr.trim();
+        int index = indexStr.toInt();
+
+        if (index > 0) {
+          Serial.println("[SMS] → Found message at index " + String(index));
+          // Add to queue (handleNewMessageURC checks for duplicates)
+          handleNewMessageURC(index);
+        }
+      }
+
+      startPos = cmglPos + 7;
+    }
+  } else {
+    Serial.println("[SMS] No unread messages found");
+  }
+
+  Serial.println("[SMS] === End scan ===");
+}
+
 void ModemSMS::processBackground() {
   // SMS works independently - read URCs directly from SerialAT
   // Note: This function only runs when ENABLE_SMS=1 (i.e., when ENABLE_MQTT=0)
