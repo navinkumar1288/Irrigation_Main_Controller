@@ -593,24 +593,21 @@ void loop() {
   if (sms.needsReconfiguration()) {
     Serial.println("[Main] ⚠ SMS needs reconfiguration");
 
-    // Check if modem is ready (detected via +QIND: SMS DONE)
-    if (!sms.isReady() && !ModemBase::isReady()) {
-      Serial.println("[Main] → Modem not ready yet, waiting for +QIND: SMS DONE...");
-      // Don't configure yet - wait for modem to be ready
-      // needsReconfiguration() will remain true until modem is ready
-    } else {
-      Serial.println("[Main] → Modem ready, configuring SMS...");
-      // Clear any garbage in serial buffer before configuring
-      while (SerialAT.available()) {
-        SerialAT.read();
-      }
+    // The configure() method checks modemReady internally
+    // Just attempt configuration - it will fail gracefully if modem not ready
+    Serial.println("[Main] → Configuring SMS...");
 
-      if (sms.configure()) {
-        Serial.println("[Main] ✓ SMS reconfigured successfully");
-      } else {
-        Serial.println("[Main] ❌ SMS reconfiguration failed");
-        // Don't block here - continue with other tasks
-      }
+    // Clear any garbage in serial buffer before configuring
+    while (SerialAT.available()) {
+      SerialAT.read();
+    }
+
+    if (sms.configure()) {
+      Serial.println("[Main] ✓ SMS reconfigured successfully");
+    } else {
+      Serial.println("[Main] ❌ SMS reconfiguration failed (modem may not be ready yet)");
+      // Don't block here - continue with other tasks
+      // Will retry on next loop iteration
     }
   }
   #endif
