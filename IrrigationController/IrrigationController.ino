@@ -235,30 +235,58 @@ void processSMSCommands() {
           response = "Scanning complete. Check logs.";
         }
         // NODE command - send LoRa command
-        // Supports two formats:
+        // Supports multiple formats:
         // 1. "NODE <id> <command>" - e.g., "NODE 1 PING"
-        // 2. "<id> <command>" - e.g., "1 PING" (same as serial commands)
+        // 2. "<id> <command>" - e.g., "1 PING"
+        // 3. "<id> OPEN <duration_ms>" - e.g., "1 OPEN 60000"
+        // 4. "<id> OPEN <duration_ms> <valve_id>" - e.g., "1 OPEN 30000 2"
         else if (cmd.startsWith("NODE ") || (cmd.length() > 0 && isdigit(cmd.charAt(0)))) {
           int nodeId = 0;
-          String nodeCmd = "";
+          String cmdLine = "";
 
           // Parse command format
           if (cmd.startsWith("NODE ")) {
-            // Format: NODE <id> <command>
+            // Format: NODE <id> <command>...
             int space1 = cmd.indexOf(' ', 5);
             if (space1 > 0) {
               String nodeStr = cmd.substring(5, space1);
-              nodeCmd = cmd.substring(space1 + 1);
+              cmdLine = cmd.substring(space1 + 1);
               nodeId = nodeStr.toInt();
             }
           } else {
-            // Format: <id> <command>
+            // Format: <id> <command>...
             int space1 = cmd.indexOf(' ');
             if (space1 > 0) {
               String nodeStr = cmd.substring(0, space1);
-              nodeCmd = cmd.substring(space1 + 1);
+              cmdLine = cmd.substring(space1 + 1);
               nodeId = nodeStr.toInt();
             }
+          }
+
+          // Parse command and optional parameters
+          String nodeCmd = "";
+          uint32_t durationMs = 0;
+          uint8_t valveId = 0;
+
+          cmdLine.trim();
+          int space2 = cmdLine.indexOf(' ');
+          if (space2 > 0) {
+            nodeCmd = cmdLine.substring(0, space2);
+            String params = cmdLine.substring(space2 + 1);
+            params.trim();
+
+            // Check if there's a third parameter (valve_id)
+            int space3 = params.indexOf(' ');
+            if (space3 > 0) {
+              // Format: OPEN <duration_ms> <valve_id>
+              durationMs = params.substring(0, space3).toInt();
+              valveId = params.substring(space3 + 1).toInt();
+            } else {
+              // Format: OPEN <duration_ms>
+              durationMs = params.toInt();
+            }
+          } else {
+            nodeCmd = cmdLine;
           }
 
           // Execute command if valid
@@ -269,13 +297,20 @@ void processSMSCommands() {
               Serial.println("[SMS] ✓ Command parsed successfully");
               Serial.println("[SMS]   Node ID: " + String(nodeId));
               Serial.println("[SMS]   Command: " + nodeCmd);
+              if (durationMs > 0) Serial.println("[SMS]   Duration: " + String(durationMs) + "ms");
+              if (valveId > 0) Serial.println("[SMS]   Valve: " + String(valveId));
               Serial.println("[SMS] → Sending via LoRa...");
 
-              bool result = loraComm.sendWithAck(nodeCmd, nodeId, "", 0, 0);
+              // Build schedule ID with valve info if specified
+              String schedId = valveId > 0 ? "TEST_V" + String(valveId) : "";
+
+              bool result = loraComm.sendWithAck(nodeCmd, nodeId, schedId, valveId, durationMs);
 
               if (result) {
                 Serial.println("[SMS] ✓✓✓ LoRa SUCCESS ✓✓✓");
                 response = "Node " + String(nodeId) + " OK: " + nodeCmd;
+                if (durationMs > 0) response += " " + String(durationMs) + "ms";
+                if (valveId > 0) response += " V" + String(valveId);
               } else {
                 Serial.println("[SMS] ✗✗✗ LoRa TIMEOUT ✗✗✗");
                 response = "Node " + String(nodeId) + " TIMEOUT";
@@ -294,12 +329,14 @@ void processSMSCommands() {
             Serial.println("[SMS] ❌ Invalid command parameters:");
             Serial.println("[SMS]   NodeID: " + String(nodeId) + " (valid: 1-255)");
             Serial.println("[SMS]   Command: '" + nodeCmd + "' (length: " + String(nodeCmd.length()) + ")");
-            response = "Format: <id> <cmd> OR NODE <id> <cmd>";
+            response = "Format: <id> <cmd> [duration_ms] [valve_id]";
           }
         }
         // HELP command
         else if (cmd == "HELP") {
-          response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, CHECK, <id> <cmd> (e.g., 1 PING), HELP";
+          response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, CHECK, "
+                     "<id> <cmd> [duration] [valve], HELP. "
+                     "Examples: 1 PING, 1 OPEN 60000, 1 OPEN 30000 2";
         }
         // Unknown command
         else {
@@ -651,31 +688,73 @@ void loop() {
         if (line.indexOf("SRC=") < 0) line += ",SRC=SERIAL";
         incomingQueue.enqueue(line);
       }
-      // It's a simple command: <node> <command>
+      // It's a simple command: <node> <command> [duration_ms] [valve_id]
       else {
         int space = line.indexOf(' ');
         if (space > 0) {
           int node = line.substring(0, space).toInt();
-          String cmd = line.substring(space + 1);
+          String cmdLine = line.substring(space + 1);
+          cmdLine.trim();
+
+          // Parse command and optional parameters
+          String cmd = "";
+          uint32_t durationMs = 0;
+          uint8_t valveId = 0;
+
+          int space2 = cmdLine.indexOf(' ');
+          if (space2 > 0) {
+            cmd = cmdLine.substring(0, space2);
+            String params = cmdLine.substring(space2 + 1);
+            params.trim();
+
+            // Check if there's a third parameter (valve_id for multi-valve nodes)
+            int space3 = params.indexOf(' ');
+            if (space3 > 0) {
+              // Format: <node> OPEN <duration_ms> <valve_id>
+              durationMs = params.substring(0, space3).toInt();
+              valveId = params.substring(space3 + 1).toInt();
+            } else {
+              // Format: <node> OPEN <duration_ms>
+              durationMs = params.toInt();
+            }
+          } else {
+            cmd = cmdLine;
+          }
+
           cmd.toUpperCase();
           cmd.trim();
-          
+
           if (node > 0 && node <= 255 && cmd.length() > 0) {
-            Serial.printf("[Serial] Node: %d, Command: %s\n", node, cmd.c_str());
-            
+            Serial.printf("[Serial] Node: %d, Command: %s", node, cmd.c_str());
+            if (durationMs > 0) Serial.printf(", Duration: %ums", durationMs);
+            if (valveId > 0) Serial.printf(", Valve: %u", valveId);
+            Serial.println();
+
             #if ENABLE_LORA
             if (loraInitialized) {
               Serial.println("[Serial] Sending via LoRa...");
-              bool result = loraComm.sendWithAck(cmd, node, "", 0, 0);
-              
+
+              // Build schedule ID with valve info if specified
+              String schedId = valveId > 0 ? "TEST_V" + String(valveId) : "";
+
+              bool result = loraComm.sendWithAck(cmd, node, schedId, valveId, durationMs);
+
               if (result) {
                 Serial.println("[Serial] ✓✓✓ SUCCESS ✓✓✓");
                 // Publish manual command success (important event)
-                publishStatus("EVT|CMD|N=" + String(node) + "|C=" + cmd + "|OK");
+                String evt = "EVT|CMD|N=" + String(node) + "|C=" + cmd;
+                if (durationMs > 0) evt += "|D=" + String(durationMs);
+                if (valveId > 0) evt += "|V=" + String(valveId);
+                evt += "|OK";
+                publishStatus(evt);
               } else {
                 Serial.println("[Serial] ✗✗✗ FAILED ✗✗✗");
                 // Publish manual command failure (important event)
-                publishStatus("ERR|CMD|N=" + String(node) + "|C=" + cmd + "|FAIL");
+                String err = "ERR|CMD|N=" + String(node) + "|C=" + cmd;
+                if (durationMs > 0) err += "|D=" + String(durationMs);
+                if (valveId > 0) err += "|V=" + String(valveId);
+                err += "|FAIL";
+                publishStatus(err);
 
                 // Send SMS alert for failed commands (with rate limiting)
                 sendSMSNotification("ALERT: LoRa command failed. Node: " +
@@ -690,12 +769,20 @@ void loop() {
             #endif
           } else {
             Serial.println("[Serial] ✗ Invalid format");
-            Serial.println("[Serial] Use: <node> <command>");
-            Serial.println("[Serial] Example: 1 PING");
+            Serial.println("[Serial] Usage:");
+            Serial.println("[Serial]   <node> PING");
+            Serial.println("[Serial]   <node> STATUS");
+            Serial.println("[Serial]   <node> CLOSE");
+            Serial.println("[Serial]   <node> OPEN <duration_ms>");
+            Serial.println("[Serial]   <node> OPEN <duration_ms> <valve_id>");
+            Serial.println("[Serial] Examples:");
+            Serial.println("[Serial]   1 PING");
+            Serial.println("[Serial]   1 OPEN 60000        (open for 60 seconds)");
+            Serial.println("[Serial]   1 OPEN 30000 2      (open valve 2 for 30 seconds)");
           }
         } else {
           Serial.println("[Serial] ✗ Invalid format");
-          Serial.println("[Serial] Use: <node> <command>");
+          Serial.println("[Serial] Use: <node> <command> [duration_ms] [valve_id]");
         }
       }
       
