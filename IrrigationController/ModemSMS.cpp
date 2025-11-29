@@ -78,6 +78,19 @@ bool ModemSMS::configure() {
   smsReady = true;
   Serial.println("[SMS] ✓ Configuration complete");
 
+  // Clean up old read messages to free storage
+  Serial.println("[SMS] → Cleaning up old read messages...");
+  String delResp = sendCommand("AT+CMGD=1,1", 3000);  // Delete all read messages
+  if (delResp.indexOf("OK") >= 0) {
+    Serial.println("[SMS] ✓ Old read messages deleted");
+  } else {
+    Serial.println("[SMS] ⚠ Could not delete old messages: " + delResp);
+  }
+
+  // Check storage after cleanup
+  String storageCheck = sendCommand("AT+CPMS?", 2000);
+  Serial.println("[SMS] Storage after cleanup: " + storageCheck);
+
   // Test: List all messages to see if any exist
   Serial.println("[SMS] === Diagnostic: Checking for existing messages ===");
   String listCmd = sendCommand("AT+CMGL=\"ALL\"", 5000);
