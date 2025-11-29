@@ -397,13 +397,38 @@ String ModemSMS::readSMSByIndex(int index, String &sender, String &timestamp) {
 
   // If there's a newline before any quote, this is PDU mode
   if (firstNewlineAfterCmgr > 0 && (firstQuoteAfterCmgr < 0 || firstNewlineAfterCmgr < firstQuoteAfterCmgr)) {
-    Serial.println("[SMS] ⚠ WARNING: Message in PDU mode (old message)");
-    Serial.println("[SMS] ℹ This message was stored before text mode was configured");
-    Serial.println("[SMS] → Deleting PDU message, please resend");
-    return "";  // Will be deleted by caller
+    Serial.println("[SMS] ⚠ WARNING: Message in PDU mode!");
+    Serial.println("[SMS] ℹ Modem lost text mode configuration");
+    Serial.println("[SMS] → Reconfiguring to text mode and retrying...");
+
+    // Reconfigure to text mode
+    smsReady = false;
+    if (configureTextMode()) {
+      Serial.println("[SMS] ✓ Text mode restored");
+      smsReady = true;
+
+      // Retry reading the message - should now be in text mode
+      Serial.println("[SMS] → Retrying message read...");
+      resp = sendCommand(cmd, 3000);
+
+      // Re-check for +CMGR
+      cmgrPos = resp.indexOf("+CMGR:");
+      if (cmgrPos < 0) {
+        Serial.println("[SMS] ❌ Still failed to read message after reconfiguration");
+        return "";
+      }
+
+      // Message should now be readable in text mode - continue parsing below
+      Serial.println("[SMS] ✓ Message now in text mode");
+    } else {
+      Serial.println("[SMS] ❌ Failed to reconfigure text mode");
+      return "";
+    }
   }
 
   // Extract sender (phone number)
+  // Recalculate positions in case we retried after PDU mode detection
+  firstQuoteAfterCmgr = resp.indexOf("\"", cmgrPos);
   int firstQuote = resp.indexOf("\"", cmgrPos + 7);
   int secondQuote = resp.indexOf("\"", firstQuote + 1);
   int thirdQuote = resp.indexOf("\"", secondQuote + 1);
