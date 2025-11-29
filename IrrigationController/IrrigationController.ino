@@ -139,20 +139,12 @@ void processSMSCommands() {
     lastDiagnostic = millis();
     int queuedCount = sms.getUnreadCount();
     Serial.println("[SMS] 📬 Diagnostic: " + String(queuedCount) + " messages queued, SMS Ready: " +
-                   String(sms.isReady() ? "YES" : "NO") + ", Needs Reconfig: " +
-                   String(sms.needsReconfiguration() ? "YES" : "NO"));
+                   String(sms.isReady() ? "YES" : "NO"));
   }
 
   if (!sms.isReady()) {
     Serial.println("[SMS] ⚠ SMS not ready - skipping message processing");
     return;  // SMS not ready - messages will wait in queue
-  }
-
-  // Don't process messages if reconfiguration is needed (e.g., after modem restart)
-  // This prevents trying to read PDU-mode messages before text mode is restored
-  if (sms.needsReconfiguration()) {
-    Serial.println("[SMS] ⏸ Skipping message processing - reconfiguration pending");
-    return;
   }
 
   // Check for new messages
@@ -320,18 +312,11 @@ void processSMSCommands() {
         // Publish SMS command event
         publishStatus("EVT|SMS_CMD|" + cmd);
       } else {
-        // Failed to read message (likely PDU mode or other error)
+        // Failed to read message
         Serial.println("[SMS] ⚠ Failed to read message at index " + String(index));
-
-        // If reconfiguration is needed, re-queue for retry after reconfiguration
-        if (sms.needsReconfiguration()) {
-          sms.requeueMessage(index);
-          Serial.println("[SMS] → Message will be retried after reconfiguration");
-        } else {
-          // Unknown error - still try to delete to avoid infinite loop
-          Serial.println("[SMS] ⚠ Deleting unreadable message");
-          sms.deleteSMS(index);
-        }
+        // Delete unreadable message to avoid infinite loop
+        Serial.println("[SMS] ⚠ Deleting unreadable message");
+        sms.deleteSMS(index);
       }
     }
   }
@@ -554,8 +539,7 @@ void loop() {
     Serial.println("[Loop] ❤ Heartbeat - Loop running");
     #if ENABLE_SMS
     Serial.println("[Loop] SMS Status: Ready=" + String(sms.isReady() ? "YES" : "NO") +
-                   ", Queued=" + String(sms.getUnreadCount()) +
-                   ", NeedsReconfig=" + String(sms.needsReconfiguration() ? "YES" : "NO"));
+                   ", Queued=" + String(sms.getUnreadCount()));
     #endif
   }
 
@@ -590,28 +574,7 @@ void loop() {
   #if ENABLE_SMS
   sms.processBackground();
 
-  // Check if SMS needs reconfiguration after modem restart
-  // SMS reconfiguration happens independently of MQTT status
-  if (sms.needsReconfiguration()) {
-    Serial.println("[Main] ⚠ SMS needs reconfiguration");
-
-    // The configure() method checks modemReady internally
-    // Just attempt configuration - it will fail gracefully if modem not ready
-    Serial.println("[Main] → Configuring SMS...");
-
-    // Clear any garbage in serial buffer before configuring
-    while (SerialAT.available()) {
-      SerialAT.read();
-    }
-
-    if (sms.configure()) {
-      Serial.println("[Main] ✓ SMS reconfigured successfully");
-    } else {
-      Serial.println("[Main] ❌ SMS reconfiguration failed (modem may not be ready yet)");
-      // Don't block here - continue with other tasks
-      // Will retry on next loop iteration
-    }
-  }
+  // REMOVED: SMS reconfiguration logic removed since modem restart is disabled
   #endif
   
   // Check and process SMS commands periodically
