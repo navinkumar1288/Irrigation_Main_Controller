@@ -608,8 +608,19 @@ void loop() {
       Serial.println("\n[Serial] ==================");
       Serial.println("[Serial] Input: " + line);
       
+      // Check for special SMS diagnostic command
+      if (line.equalsIgnoreCase("SMSDIAG") || line.equalsIgnoreCase("SMS DIAG")) {
+        Serial.println("[Serial] Running SMS diagnostics...");
+        #if ENABLE_SMS
+        sms.printSMSDiagnostics();
+        Serial.println("\n[Serial] Forcing message scan...");
+        sms.scanForNewMessages();
+        #else
+        Serial.println("[Serial] SMS is disabled");
+        #endif
+      }
       // Check if it's a schedule
-      if (line.startsWith("SCH|") || line.startsWith("{")) {
+      else if (line.startsWith("SCH|") || line.startsWith("{")) {
         Serial.println("[Serial] Schedule detected, queuing...");
         if (line.indexOf("SRC=") < 0) line += ",SRC=SERIAL";
         incomingQueue.enqueue(line);

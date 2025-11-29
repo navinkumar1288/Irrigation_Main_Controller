@@ -506,16 +506,31 @@ void ModemSMS::scanForNewMessages() {
 
   Serial.println("[SMS] === Scanning for new messages (bypassing URCs) ===");
 
-  // Use AT+CMGL to list all unread messages
+  // First, check storage status
+  String cpms = sendCommand("AT+CPMS?", 2000);
+  Serial.println("[SMS] Storage status: " + cpms);
+
+  // Try multiple scan approaches to find messages
+
+  // 1. Try "REC UNREAD" (unread messages)
+  Serial.println("[SMS] → Trying REC UNREAD...");
   String listCmd = sendCommand("AT+CMGL=\"REC UNREAD\"", 5000);
 
+  if (listCmd.indexOf("+CMGL:") < 0) {
+    // 2. Try "ALL" (all messages)
+    Serial.println("[SMS] → No REC UNREAD, trying ALL...");
+    listCmd = sendCommand("AT+CMGL=\"ALL\"", 5000);
+  }
+
   if (listCmd.indexOf("+CMGL:") >= 0) {
-    Serial.println("[SMS] Found unread messages:");
+    Serial.println("[SMS] ✓ Found messages:");
     Serial.println(listCmd);
 
     // Parse message indices from +CMGL response
     // Format: +CMGL: <index>,"REC UNREAD","+1234567890","","21/11/17,10:30:45+00"
     int startPos = 0;
+    int messagesFound = 0;
+
     while (true) {
       int cmglPos = listCmd.indexOf("+CMGL: ", startPos);
       if (cmglPos < 0) break;
@@ -528,6 +543,7 @@ void ModemSMS::scanForNewMessages() {
         int index = indexStr.toInt();
 
         if (index > 0) {
+          messagesFound++;
           Serial.println("[SMS] → Found message at index " + String(index));
           // Add to queue (handleNewMessageURC checks for duplicates)
           handleNewMessageURC(index);
@@ -536,8 +552,11 @@ void ModemSMS::scanForNewMessages() {
 
       startPos = cmglPos + 7;
     }
+
+    Serial.println("[SMS] Total messages found: " + String(messagesFound));
   } else {
-    Serial.println("[SMS] No unread messages found");
+    Serial.println("[SMS] ⚠ No messages found in storage");
+    Serial.println("[SMS] Raw response: " + listCmd);
   }
 
   Serial.println("[SMS] === End scan ===");
