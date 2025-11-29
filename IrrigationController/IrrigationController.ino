@@ -619,6 +619,33 @@ void loop() {
         Serial.println("[Serial] SMS is disabled");
         #endif
       }
+      // Delete all messages (useful for clearing old PDU messages)
+      else if (line.equalsIgnoreCase("SMSCLEAN") || line.equalsIgnoreCase("SMS CLEAN")) {
+        Serial.println("[Serial] Deleting all SMS messages...");
+        #if ENABLE_SMS
+        if (sms.deleteAllSMS()) {
+          Serial.println("[Serial] ✓ All messages deleted");
+          Serial.println("[Serial] ℹ Please resend your SMS in text format");
+        } else {
+          Serial.println("[Serial] ❌ Failed to delete messages");
+        }
+        #else
+        Serial.println("[Serial] SMS is disabled");
+        #endif
+      }
+      // Reconfigure SMS (useful after cleaning)
+      else if (line.equalsIgnoreCase("SMSCONFIG") || line.equalsIgnoreCase("SMS CONFIG")) {
+        Serial.println("[Serial] Reconfiguring SMS...");
+        #if ENABLE_SMS
+        if (sms.configure()) {
+          Serial.println("[Serial] ✓ SMS reconfigured");
+        } else {
+          Serial.println("[Serial] ❌ SMS configuration failed");
+        }
+        #else
+        Serial.println("[Serial] SMS is disabled");
+        #endif
+      }
       // Check if it's a schedule
       else if (line.startsWith("SCH|") || line.startsWith("{")) {
         Serial.println("[Serial] Schedule detected, queuing...");

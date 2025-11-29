@@ -377,7 +377,21 @@ String ModemSMS::readSMSByIndex(int index, String &sender, String &timestamp) {
     return "";
   }
 
-  // SIMPLIFIED: Removed PDU mode detection since we maintain text mode
+  // Check if response is in PDU mode (indicates old message from before text mode was set)
+  // PDU format: "+CMGR: 0,,26" (status, alpha, length)
+  // Text format: "+CMGR: "REC UNREAD",..." (has quotes)
+
+  // Look for quotes in the response - text mode always has quotes
+  int firstQuoteAfterCmgr = resp.indexOf("\"", cmgrPos);
+  int firstNewlineAfterCmgr = resp.indexOf("\n", cmgrPos);
+
+  // If there's a newline before any quote, this is PDU mode
+  if (firstNewlineAfterCmgr > 0 && (firstQuoteAfterCmgr < 0 || firstNewlineAfterCmgr < firstQuoteAfterCmgr)) {
+    Serial.println("[SMS] ⚠ WARNING: Message in PDU mode (old message)");
+    Serial.println("[SMS] ℹ This message was stored before text mode was configured");
+    Serial.println("[SMS] → Deleting PDU message, please resend");
+    return "";  // Will be deleted by caller
+  }
 
   // Extract sender (phone number)
   int firstQuote = resp.indexOf("\"", cmgrPos + 7);
