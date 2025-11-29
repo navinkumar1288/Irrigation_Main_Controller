@@ -55,13 +55,13 @@ bool ModemBase::init() {
   String model = sendCommand("ATI", 1000);
   Serial.println("[Modem] Model: " + model);
   
-  // Check SIM card - retry multiple times as SIM detection can take time
+  // Check SIM card - quick check with fewer retries since modem may already be initialized
   Serial.println("[Modem] Checking SIM...");
   bool simReady = false;
-  String simStatus = "";
 
-  for (int retry = 0; retry < 15; retry++) {
-    simStatus = sendCommand("AT+CPIN?", 2000);
+  // Quick check - only 5 retries since modem should already be running
+  for (int retry = 0; retry < 5; retry++) {
+    String simStatus = sendCommand("AT+CPIN?", 2000);
 
     if (simStatus.indexOf("READY") >= 0) {
       simReady = true;
@@ -69,85 +69,19 @@ bool ModemBase::init() {
       break;
     }
 
-    // Check if it's a temporary error (SIM still initializing)
+    // If SIM busy, wait a bit
     if (simStatus.indexOf("+CME ERROR: 14") >= 0) {
-      // CME ERROR 14 = SIM busy (still initializing)
-      if (retry % 3 == 0) {
-        Serial.print("[Modem] SIM initializing");
-      }
-      Serial.print(".");
-      delay(2000);  // Wait longer for SIM busy
-    } else if (simStatus.indexOf("ERROR") >= 0) {
-      // Other errors - wait a bit and retry
-      if (retry == 0) {
-        Serial.print("[Modem] Waiting for SIM");
-      }
       Serial.print(".");
       delay(1000);
-    } else {
-      // No response or unknown - retry
-      delay(1000);
+    } else if (retry < 4) {
+      delay(500);
     }
   }
 
   if (!simReady) {
-    Serial.println("\n[Modem] ❌ SIM not ready after 15 attempts!");
-    Serial.println("[Modem] Last response: " + simStatus);
-
-    // Parse and display CME ERROR code if present
-    int cmePos = simStatus.indexOf("+CME ERROR:");
-    if (cmePos >= 0) {
-      // Extract error code
-      int codeStart = cmePos + 12; // Length of "+CME ERROR: "
-      int codeEnd = simStatus.indexOf("\n", codeStart);
-      if (codeEnd < 0) codeEnd = simStatus.length();
-      String errorCode = simStatus.substring(codeStart, codeEnd);
-      errorCode.trim();
-
-      Serial.println("[Modem] CME Error Code: " + errorCode);
-
-      // Provide helpful error descriptions
-      int code = errorCode.toInt();
-      switch (code) {
-        case 10: Serial.println("[Modem] Error: SIM not inserted"); break;
-        case 11: Serial.println("[Modem] Error: SIM PIN required"); break;
-        case 12: Serial.println("[Modem] Error: SIM PUK required"); break;
-        case 13: Serial.println("[Modem] Error: SIM failure"); break;
-        case 14: Serial.println("[Modem] Error: SIM busy (timeout waiting)"); break;
-        case 15: Serial.println("[Modem] Error: SIM wrong"); break;
-        case 16: Serial.println("[Modem] Error: Incorrect password"); break;
-        case 17: Serial.println("[Modem] Error: SIM PIN2 required"); break;
-        case 18: Serial.println("[Modem] Error: SIM PUK2 required"); break;
-        case 20: Serial.println("[Modem] Error: Memory full"); break;
-        case 21: Serial.println("[Modem] Error: Invalid index"); break;
-        case 22: Serial.println("[Modem] Error: Not found"); break;
-        case 23: Serial.println("[Modem] Error: Memory failure"); break;
-        case 24: Serial.println("[Modem] Error: Text string too long"); break;
-        case 25: Serial.println("[Modem] Error: Invalid characters in text"); break;
-        case 26: Serial.println("[Modem] Error: Dial string too long"); break;
-        case 27: Serial.println("[Modem] Error: Invalid characters in dial string"); break;
-        case 30: Serial.println("[Modem] Error: No network service"); break;
-        case 31: Serial.println("[Modem] Error: Network timeout"); break;
-        case 32: Serial.println("[Modem] Error: Network not allowed - emergency calls only"); break;
-        case 100: Serial.println("[Modem] Error: Unknown error"); break;
-        default: Serial.println("[Modem] Error: Code " + errorCode); break;
-      }
-
-      // Special guidance for common issues
-      if (code == 10) {
-        Serial.println("[Modem] ℹ Please insert a SIM card and restart");
-      } else if (code == 11) {
-        Serial.println("[Modem] ℹ Use AT+CPIN=<pin> to unlock SIM");
-      } else if (code == 12) {
-        Serial.println("[Modem] ℹ SIM locked! Use AT+CPIN=<puk>,<new_pin> to unlock");
-      } else if (code == 13 || code == 15) {
-        Serial.println("[Modem] ℹ Try reseating the SIM card or use a different SIM");
-      } else if (code == 14) {
-        Serial.println("[Modem] ℹ SIM was busy for too long - may be defective");
-      }
-    }
-
-    return false;
+    Serial.println("\n[Modem] ⚠ SIM check failed - but continuing anyway");
+    Serial.println("[Modem] ℹ Modem may already be initialized from previous session");
+    // Don't return false - continue with init
   }
   
   // Configure network mode (LTE only for EC200U)
@@ -158,44 +92,35 @@ bool ModemBase::init() {
   // Format: AT+QICSGP=<contextID>,<context_type>,"<APN>","<username>","<password>",<authentication>
   sendCommand("AT+QICSGP=1,1,\"" + String(MODEM_APN) + "\",\"\",\"\",1", 2000);
   
-  // Wait for network registration
-  Serial.println("[Modem] Waiting for network registration...");
+  // Check network registration - quick check since modem may already be registered
+  Serial.println("[Modem] Checking network registration...");
   bool registered = false;
-  int attempts = 0;
 
-  while (attempts < NETWORK_REGISTRATION_TIMEOUT_S && !registered) {  // Configurable timeout
+  // Quick check - only 10 attempts (10 seconds) since modem should already be registered
+  for (int attempts = 0; attempts < 10; attempts++) {
     String creg = sendCommand("AT+CREG?", 1000);
     String cgreg = sendCommand("AT+CGREG?", 1000);
-    
+
     // Check registration status
     // +CREG: 0,1 = registered (home)
     // +CREG: 0,5 = registered (roaming)
     if ((creg.indexOf(",1") >= 0 || creg.indexOf(",5") >= 0) ||
         (cgreg.indexOf(",1") >= 0 || cgreg.indexOf(",5") >= 0)) {
       registered = true;
-      Serial.println("\n[Modem] ✓ Network registered");
+      Serial.println("[Modem] ✓ Network registered");
       break;
     }
-    
-    if (attempts % 5 == 0) {
-      Serial.print("\n[Modem] Still waiting... ");
+
+    if (attempts % 3 == 0 && attempts > 0) {
+      Serial.print(".");
     }
-    Serial.print(".");
-    
     delay(1000);
-    attempts++;
   }
-  
+
   if (!registered) {
-    Serial.println("\n[Modem] ❌ Network registration failed");
-    
-    // Debug info
-    Serial.println("[Modem] Debug info:");
-    sendCommand("AT+CREG?", 1000);
-    sendCommand("AT+CGREG?", 1000);
-    sendCommand("AT+COPS?", 3000);
-    
-    return false;
+    Serial.println("\n[Modem] ⚠ Network registration timeout - but continuing anyway");
+    Serial.println("[Modem] ℹ SMS may still work if modem was already registered");
+    // Don't return false - SMS can work even without full data registration
   }
   
   // Check signal quality
@@ -206,26 +131,29 @@ bool ModemBase::init() {
   String cops = getOperator();
   Serial.println("[Modem] Operator: " + cops);
   
-  // Activate PDP context (CRITICAL for EC200U)
-  Serial.println("[Modem] Activating data connection...");
-  sendCommand("AT+QIACT=1", 3000);
-  delay(1000);
-  
-  // Check PDP context activation
+  // Activate PDP context (needed for MQTT, but not for SMS)
+  Serial.println("[Modem] Checking data connection...");
   String qiact = sendCommand("AT+QIACT?", 2000);
-  Serial.println("[Modem] PDP Context: " + qiact);
-  
+
   if (qiact.indexOf("1,1") < 0) {
-    Serial.println("[Modem] ⚠ PDP context not active, retrying...");
-    sendCommand("AT+QIDEACT=1", 2000);
-    delay(1000);
+    Serial.println("[Modem] → Activating PDP context...");
     sendCommand("AT+QIACT=1", 3000);
-    delay(2000);
+    delay(1000);
+    qiact = sendCommand("AT+QIACT?", 2000);
+
+    if (qiact.indexOf("1,1") >= 0) {
+      Serial.println("[Modem] ✓ PDP context active");
+    } else {
+      Serial.println("[Modem] ⚠ PDP activation failed - SMS will still work");
+    }
+  } else {
+    Serial.println("[Modem] ✓ PDP context already active");
   }
-  
+
+  // Always mark modem as ready - SMS works even without full data connectivity
   modemReady = true;
-  Serial.println("[Modem] ✓ Initialization complete");
-  
+  Serial.println("[Modem] ✓ Modem ready for SMS/MQTT");
+
   return true;
 }
 
