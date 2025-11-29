@@ -697,7 +697,8 @@ void ModemSMS::processURC(const String& urc) {
       indexStr.trim();
       int index = indexStr.toInt();
 
-      if (index > 0) {
+      // Index 0 is valid! Don't skip it
+      if (index >= 0) {
         // Add to pending queue for processing by main loop
         handleNewMessageURC(index);
       }
