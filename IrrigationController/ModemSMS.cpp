@@ -628,8 +628,13 @@ void ModemSMS::processBackground() {
 
 // Helper function to process a single URC
 void ModemSMS::processURC(const String& urc) {
-  // REMOVED: Modem restart detection removed per user request
-  // No longer handling RDY or POWERED DOWN events since we don't restart the modem
+  // Handle modem restart - simple detection and reconfiguration
+  // If modem restarts (power loss, crash), we need to reconfigure text mode
+  if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
+    Serial.println("[SMS] ⚠ Modem restart detected!");
+    Serial.println("[SMS] → Will reconfigure SMS on next loop");
+    smsReady = false;  // Mark as not ready, will reconfigure automatically
+  }
 
   // Handle new SMS notification
   // +CMTI: "SM",<index> or +CMTI: "ME",<index>
