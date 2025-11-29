@@ -556,7 +556,8 @@ void ModemSMS::scanForNewMessages() {
         indexStr.trim();
         int index = indexStr.toInt();
 
-        if (index > 0) {
+        // Index 0 is valid! Don't skip it
+        if (index >= 0) {
           messagesFound++;
           Serial.println("[SMS] → Found message at index " + String(index));
           // Add to queue (handleNewMessageURC checks for duplicates)
