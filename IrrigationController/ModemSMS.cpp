@@ -1,14 +1,13 @@
 // ModemSMS.cpp - SMS communication for Quectel EC200U
 #include "ModemSMS.h"
 
-ModemSMS::ModemSMS() : smsReady(false), needsReconfigure(false), lastSMSCheck(0), smsCheckInterval(10000) {
+ModemSMS::ModemSMS() : smsReady(false), lastSMSCheck(0), smsCheckInterval(10000) {
   pendingMessageIndices.clear();
 }
 
 bool ModemSMS::configure() {
   if (!modemReady) {
     Serial.println("[SMS] ❌ Modem not ready for SMS");
-    needsReconfigure = false;  // Clear flag to prevent infinite loop
     return false;
   }
 
@@ -26,7 +25,6 @@ bool ModemSMS::configure() {
 
   // Configure SMS text mode
   if (!configureTextMode()) {
-    needsReconfigure = false;  // Clear flag even on failure to prevent infinite loop
     return false;
   }
 
@@ -68,7 +66,6 @@ bool ModemSMS::configure() {
   }
 
   smsReady = true;
-  needsReconfigure = false;  // Clear reconfiguration flag
   Serial.println("[SMS] ✓ Configuration complete");
 
   // Test: List all messages to see if any exist
@@ -373,8 +370,6 @@ String ModemSMS::readSMSByIndex(int index, String &sender, String &timestamp) {
   // Parse response
   // TEXT MODE: +CMGR: "REC UNREAD","+1234567890","","21/11/17,10:30:45+00"
   //           Message text here
-  // PDU MODE:  +CMGR: 0,,29
-  //           0791198904109116...
 
   int cmgrPos = resp.indexOf("+CMGR:");
   if (cmgrPos < 0) {
@@ -382,26 +377,7 @@ String ModemSMS::readSMSByIndex(int index, String &sender, String &timestamp) {
     return "";
   }
 
-  // Check if response is in PDU mode (no quotes after +CMGR:)
-  // PDU format: "+CMGR: 0,,29" or "+CMGR: 1,,29"
-  // Text format: "+CMGR: "REC UNREAD",..."
-  int firstQuoteCheck = resp.indexOf("\"", cmgrPos + 7);
-  int firstCommaCheck = resp.indexOf(",", cmgrPos + 7);
-
-  if (firstCommaCheck >= 0 && (firstQuoteCheck < 0 || firstCommaCheck < firstQuoteCheck)) {
-    // This is PDU mode - modem lost text mode configuration!
-    Serial.println("[SMS] ⚠ WARNING: Message in PDU mode!");
-    Serial.println("[SMS] ⚠ This means modem restarted and lost text mode config");
-    Serial.println("[SMS] → Triggering SMS reconfiguration...");
-
-    // Mark for reconfiguration
-    smsReady = false;
-    needsReconfigure = true;
-
-    // Don't try to parse PDU format - message will be retried after reconfiguration
-    Serial.println("[SMS] ℹ Message will be processed after reconfiguration");
-    return "";
-  }
+  // SIMPLIFIED: Removed PDU mode detection since we maintain text mode
 
   // Extract sender (phone number)
   int firstQuote = resp.indexOf("\"", cmgrPos + 7);
@@ -618,36 +594,8 @@ void ModemSMS::processBackground() {
 
 // Helper function to process a single URC
 void ModemSMS::processURC(const String& urc) {
-  // Handle modem restart/reboot
-  // When modem restarts, all configuration is lost (including text mode)
-  if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
-    Serial.println("[SMS] ⚠ Modem restart detected!");
-
-    // Reset state and mark for reconfiguration
-    smsReady = false;
-    modemReady = false;  // Mark modem as not ready until +QIND: SMS DONE
-    needsReconfigure = false;  // Don't reconfigure yet - wait for modem to be ready
-
-    // Clear serial buffer to remove any garbage data
-    Serial.println("[SMS] → Clearing serial buffer...");
-    clearSerialBuffer();
-
-    Serial.println("[SMS] → Waiting for modem initialization (+QIND: SMS DONE)");
-  }
-
-  // Handle modem initialization complete
-  // +QIND: SMS DONE means SMS module is fully initialized and ready
-  if (urc.indexOf("+QIND: SMS DONE") >= 0) {
-    Serial.println("[SMS] ✓ Modem SMS module initialized (+QIND: SMS DONE)");
-    modemReady = true;
-    Serial.println("[SMS] → Modem marked as ready for configuration");
-
-    // If SMS is not ready yet, trigger reconfiguration
-    if (!smsReady) {
-      needsReconfigure = true;
-      Serial.println("[SMS] → SMS needs configuration, marked for reconfiguration");
-    }
-  }
+  // REMOVED: Modem restart detection removed per user request
+  // No longer handling RDY or POWERED DOWN events since we don't restart the modem
 
   // Handle new SMS notification
   // +CMTI: "SM",<index> or +CMTI: "ME",<index>
@@ -679,19 +627,5 @@ void ModemSMS::processURC(const String& urc) {
   }
 }
 
-bool ModemSMS::needsReconfiguration() {
-  return needsReconfigure;
-}
-
-void ModemSMS::requeueMessage(int index) {
-  // Re-add message to queue for retry (e.g., after reconfiguration)
-  for (int idx : pendingMessageIndices) {
-    if (idx == index) {
-      Serial.println("[SMS] ℹ Message index " + String(index) + " already in queue");
-      return;  // Already in queue
-    }
-  }
-
-  pendingMessageIndices.push_back(index);
-  Serial.println("[SMS] ♻ Message index " + String(index) + " re-queued for retry");
-}
+// REMOVED: needsReconfiguration() and requeueMessage() methods removed
+// Since modem restart is disabled, these are no longer needed

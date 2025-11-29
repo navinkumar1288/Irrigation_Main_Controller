@@ -12,27 +12,19 @@ ModemBase::ModemBase() {
 
 bool ModemBase::init() {
   Serial.println("[Modem] Initializing EC200U...");
-  
-  // Power on EC200U
+
+  // REMOVED: Hardware reset/power cycle removed per user request
+  // The modem should already be powered on and running
+  // If modem needs reset, do it manually via hardware power cycle
+
+  // Initialize GPIO pins but don't toggle them
   pinMode(MODEM_PWRKEY, OUTPUT);
   pinMode(MODEM_RESET, OUTPUT);
-  
-  // Reset modem
-  digitalWrite(MODEM_RESET, HIGH);
-  delay(100);
-  digitalWrite(MODEM_RESET, LOW);
-  delay(100);
-  digitalWrite(MODEM_RESET, HIGH);
-  delay(2000);
-  
-  // Power on sequence for EC200U
-  digitalWrite(MODEM_PWRKEY, HIGH);
-  delay(500);
-  digitalWrite(MODEM_PWRKEY, LOW);
-  delay(2000);
-  
-  Serial.println("[Modem] Waiting for boot...");
-  delay(5000);  // EC200U takes ~5 seconds to boot
+  digitalWrite(MODEM_RESET, HIGH);  // Keep reset HIGH (not asserted)
+  digitalWrite(MODEM_PWRKEY, LOW);  // Keep power key LOW (not pressed)
+
+  Serial.println("[Modem] Skipping hardware reset - using existing modem session");
+  delay(1000);  // Brief delay for stability
 
   // Start serial communication
   SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
