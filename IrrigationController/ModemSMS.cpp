@@ -6,9 +6,19 @@ ModemSMS::ModemSMS() : smsReady(false), lastSMSCheck(0), smsCheckInterval(10000)
 }
 
 bool ModemSMS::configure() {
+  // If modem not marked as ready, do a quick health check first
   if (!modemReady) {
-    Serial.println("[SMS] ❌ Modem not ready for SMS");
-    return false;
+    Serial.println("[SMS] Modem not ready - testing communication...");
+    String resp = sendCommand("AT", 2000);
+    if (resp.indexOf("OK") >= 0) {
+      modemReady = true;
+      Serial.println("[SMS] ✓ Modem responding - marked as ready");
+      // Give modem a moment to fully initialize
+      delay(2000);
+    } else {
+      Serial.println("[SMS] ❌ Modem not responding yet");
+      return false;
+    }
   }
 
   Serial.println("[SMS] Configuring...");
@@ -633,7 +643,8 @@ void ModemSMS::processURC(const String& urc) {
   if (urc.indexOf("RDY") >= 0 || urc.indexOf("POWERED DOWN") >= 0) {
     Serial.println("[SMS] ⚠ Modem restart detected!");
     Serial.println("[SMS] → Will reconfigure SMS on next loop");
-    smsReady = false;  // Mark as not ready, will reconfigure automatically
+    smsReady = false;   // Mark SMS as not ready
+    modemReady = false; // Mark modem as not ready (will be checked on reconfigure)
   }
 
   // Handle new SMS notification
