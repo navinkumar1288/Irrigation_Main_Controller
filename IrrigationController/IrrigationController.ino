@@ -574,7 +574,21 @@ void loop() {
   #if ENABLE_SMS
   sms.processBackground();
 
-  // REMOVED: SMS reconfiguration logic removed since modem restart is disabled
+  // Auto-reconfigure SMS if modem restarted
+  // This is simple: if SMS becomes not ready, reconfigure it
+  if (!sms.isReady()) {
+    static unsigned long lastReconfigAttempt = 0;
+    // Only try once per 5 seconds to avoid spam
+    if (millis() - lastReconfigAttempt > 5000) {
+      lastReconfigAttempt = millis();
+      Serial.println("[Main] ⚠ SMS not ready - attempting reconfiguration...");
+      if (sms.configure()) {
+        Serial.println("[Main] ✓ SMS reconfigured successfully");
+      } else {
+        Serial.println("[Main] ❌ SMS reconfiguration failed (will retry)");
+      }
+    }
+  }
   #endif
   
   // Check and process SMS commands periodically
