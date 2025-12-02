@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include <vector>
+#include <functional>
 #include "Config.h"
 #include "ModemSMS.h"
 #include "BLEComm.h"
@@ -12,7 +13,6 @@
 
 // Forward declarations
 class ScheduleManager;
-class NodeCommunication;
 struct Schedule;
 
 // Command result structure
@@ -22,13 +22,17 @@ struct CommandResult {
   String commandType;
 };
 
+// Node command callback - called when user sends a node command
+// Returns true if command succeeded, false if failed
+typedef std::function<bool(int nodeId, const String& command)> NodeCommandCallback;
+
 class UserCommunication {
 private:
   ModemSMS* smsComm;
   BLEComm* bleComm;
   LoRaComm* loraComm;
   ModemMQTT* mqttComm;
-  NodeCommunication* nodeComm;
+  NodeCommandCallback nodeCommandCallback;
   String adminPhone;
 
   // Command handlers
@@ -49,8 +53,11 @@ private:
 public:
   UserCommunication();
 
-  // Initialize with module pointers
-  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, NodeCommunication* node, const String &adminPhoneNum);
+  // Initialize with module pointers (NO NodeCommunication - uses callback instead)
+  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, const String &adminPhoneNum);
+
+  // Set callback for node commands (business logic in .ino file)
+  void setNodeCommandCallback(NodeCommandCallback callback);
 
   // Unified channel processing - checks all enabled communication channels
   void processAllChannels(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);

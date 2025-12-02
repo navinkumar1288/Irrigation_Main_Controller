@@ -261,15 +261,43 @@ void setup() {
   }
   #endif
 
-  // Initialize UserCommunication module (depends on SMS, BLE, LoRa, MQTT, NodeComm)
+  // Initialize UserCommunication module (depends on SMS, BLE, LoRa, MQTT)
   String adminPhone = "";
   #ifdef SMS_ALERT_PHONE_1
   adminPhone = String(SMS_ALERT_PHONE_1);
   #endif
-  userComm.init(&sms, &bleComm, &loraComm, &mqtt, &nodeComm, adminPhone);
+  userComm.init(&sms, &bleComm, &loraComm, &mqtt, adminPhone);
   Serial.println("      ✓ UserComm initialized");
 
-  // Set up NodeCommunication callback for business logic
+  // Set up UserCommunication callback for node commands (business logic)
+  userComm.setNodeCommandCallback([](int nodeId, const String& command) -> bool {
+    // ========== Business Logic for User Node Commands ==========
+    Serial.printf("[Business] User requested Node %d command: %s\n", nodeId, command.c_str());
+
+    #if ENABLE_LORA
+    if (loraInitialized && nodeComm.isInitialized()) {
+      bool result = nodeComm.sendCommand(nodeId, command);
+
+      if (result) {
+        // Publish command success (business logic)
+        publishStatus("EVT|CMD|N=" + String(nodeId) + "|C=" + command + "|OK");
+      } else {
+        // Publish command failure (business logic)
+        publishStatus("ERR|CMD|N=" + String(nodeId) + "|C=" + command + "|FAIL");
+
+        // Send SMS alert for failed commands (business logic with rate limiting)
+        sendSMSNotification("ALERT: LoRa command failed. Node: " + String(nodeId) + ", Cmd: " + command,
+                            "LORA_FAIL_N" + String(nodeId));
+      }
+
+      return result;
+    }
+    #endif
+
+    return false;  // LoRa not available
+  });
+
+  // Set up NodeCommunication callback for node messages (business logic)
   nodeComm.setMessageCallback([](const NodeMessage& msg) {
     // ========== Business Logic for Node Messages ==========
     if (msg.type == NodeMessageType::TELEMETRY) {
@@ -483,52 +511,9 @@ void loop() {
         if (line.indexOf("SRC=") < 0) line += ",SRC=SERIAL";
         incomingQueue.enqueue(line);
       }
-      // It's a simple command: <node> <command>
+      // It's a simple command: <node> <command> - delegate to UserCommunication
       else {
-        int space = line.indexOf(' ');
-        if (space > 0) {
-          int node = line.substring(0, space).toInt();
-          String cmd = line.substring(space + 1);
-          cmd.toUpperCase();
-          cmd.trim();
-          
-          if (node > 0 && node <= 255 && cmd.length() > 0) {
-            Serial.printf("[Serial] Node: %d, Command: %s\n", node, cmd.c_str());
-
-            #if ENABLE_LORA
-            if (loraInitialized && nodeComm.isInitialized()) {
-              Serial.println("[Serial] Sending via NodeComm...");
-              bool result = nodeComm.sendCommand(node, cmd);
-
-              if (result) {
-                Serial.println("[Serial] ✓✓✓ SUCCESS ✓✓✓");
-                // Publish manual command success (important event)
-                publishStatus("EVT|CMD|N=" + String(node) + "|C=" + cmd + "|OK");
-              } else {
-                Serial.println("[Serial] ✗✗✗ FAILED ✗✗✗");
-                // Publish manual command failure (important event)
-                publishStatus("ERR|CMD|N=" + String(node) + "|C=" + cmd + "|FAIL");
-
-                // Send SMS alert for failed commands (with rate limiting)
-                sendSMSNotification("ALERT: LoRa command failed. Node: " +
-                                    String(node) + ", Cmd: " + cmd,
-                                    "LORA_FAIL_N" + String(node));
-              }
-            } else {
-              Serial.println("[Serial] ✗ LoRa/NodeComm not initialized");
-            }
-            #else
-            Serial.println("[Serial] ✗ LoRa disabled");
-            #endif
-          } else {
-            Serial.println("[Serial] ✗ Invalid format");
-            Serial.println("[Serial] Use: <node> <command>");
-            Serial.println("[Serial] Example: 1 PING");
-          }
-        } else {
-          Serial.println("[Serial] ✗ Invalid format");
-          Serial.println("[Serial] Use: <node> <command>");
-        }
+        userComm.processSerialCommand(line, &schedules, &scheduleRunning, &scheduleLoaded);
       }
       
       Serial.println("[Serial] ==================\n");

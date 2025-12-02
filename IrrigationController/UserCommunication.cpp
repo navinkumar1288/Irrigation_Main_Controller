@@ -1,21 +1,24 @@
 // UserCommunication.cpp - Handles all user communication (SMS, BLE, LoRa, MQTT, Serial)
 #include "UserCommunication.h"
-#include "NodeCommunication.h"
 #include "MessageQueue.h"
 
 extern MessageQueue incomingQueue;
 extern bool loraInitialized;
 
-UserCommunication::UserCommunication() : smsComm(nullptr), bleComm(nullptr), loraComm(nullptr), mqttComm(nullptr), nodeComm(nullptr) {}
+UserCommunication::UserCommunication() : smsComm(nullptr), bleComm(nullptr), loraComm(nullptr), mqttComm(nullptr), nodeCommandCallback(nullptr) {}
 
-void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, NodeCommunication* node, const String &adminPhoneNum) {
+void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, const String &adminPhoneNum) {
   smsComm = sms;
   bleComm = ble;
   loraComm = lora;
   mqttComm = mqtt;
-  nodeComm = node;
   adminPhone = adminPhoneNum;
   Serial.println("[UserComm] ✓ Initialized with all channels (SMS, BLE, LoRa, MQTT)");
+}
+
+void UserCommunication::setNodeCommandCallback(NodeCommandCallback callback) {
+  nodeCommandCallback = callback;
+  Serial.println("[UserComm] ✓ Node command callback set");
 }
 
 // ========== Command Handlers ==========
@@ -130,11 +133,12 @@ CommandResult UserCommunication::handleNodeCommand(const String &cmd) {
     }
   }
 
-  // Execute command
+  // Parse and validate
   if (nodeId > 0 && nodeId <= 255 && nodeCmd.length() > 0) {
-    if (nodeComm != nullptr && nodeComm->isInitialized()) {
-      Serial.println("[UserComm] Sending to Node " + String(nodeId) + ": " + nodeCmd);
-      bool success = nodeComm->sendCommand(nodeId, nodeCmd);
+    // Call business logic callback (set by .ino file)
+    if (nodeCommandCallback) {
+      Serial.println("[UserComm] Requesting node command: Node " + String(nodeId) + ", Cmd: " + nodeCmd);
+      bool success = nodeCommandCallback(nodeId, nodeCmd);
 
       result.success = success;
       if (success) {
@@ -144,7 +148,8 @@ CommandResult UserCommunication::handleNodeCommand(const String &cmd) {
       }
     } else {
       result.success = false;
-      result.response = "LoRa not available";
+      result.response = "Node commands not available";
+      Serial.println("[UserComm] ⚠ No node command callback set");
     }
   } else {
     result.success = false;
@@ -316,8 +321,8 @@ void UserCommunication::processMQTTCommands(std::vector<Schedule>* schedules, bo
 void UserCommunication::processBLECommand(int nodeId, const String &command) {
   Serial.println("[UserComm:BLE] Node=" + String(nodeId) + ", Command=" + command);
 
-  if (nodeComm != nullptr && nodeComm->isInitialized()) {
-    bool result = nodeComm->sendCommand(nodeId, command);
+  if (nodeCommandCallback) {
+    bool result = nodeCommandCallback(nodeId, command);
 
     String response;
     if (result) {
@@ -328,7 +333,8 @@ void UserCommunication::processBLECommand(int nodeId, const String &command) {
 
     sendBLENotification(response);
   } else {
-    sendBLENotification("ERROR|LoRa not initialized");
+    sendBLENotification("ERROR|Node commands not available");
+    Serial.println("[UserComm:BLE] ⚠ No node command callback set");
   }
 }
 
@@ -349,8 +355,8 @@ void UserCommunication::processSerialCommand(const String &input, std::vector<Sc
     if (nodeId > 0 && nodeId <= 255 && cmd.length() > 0) {
       Serial.println("[UserComm:Serial] Node: " + String(nodeId) + ", Command: " + cmd);
 
-      if (nodeComm != nullptr && nodeComm->isInitialized()) {
-        bool result = nodeComm->sendCommand(nodeId, cmd);
+      if (nodeCommandCallback) {
+        bool result = nodeCommandCallback(nodeId, cmd);
 
         if (result) {
           Serial.println("[UserComm:Serial] ✓✓✓ SUCCESS ✓✓✓");
@@ -358,7 +364,7 @@ void UserCommunication::processSerialCommand(const String &input, std::vector<Sc
           Serial.println("[UserComm:Serial] ✗✗✗ FAILED ✗✗✗");
         }
       } else {
-        Serial.println("[UserComm:Serial] ✗ LoRa not initialized");
+        Serial.println("[UserComm:Serial] ✗ Node commands not available");
       }
     } else {
       Serial.println("[UserComm:Serial] ✗ Invalid format");
