@@ -1,5 +1,5 @@
-// IrrigationController.ino - Updated with ModemMQTT and ModemSMS modules
-// Heartbeat DISABLED to save cellular data - only important events published
+// IrrigationController.ino - Refactored with UserCommunication and NodeCommunication modules
+// Clean separation: User interaction, Node communication, and Business logic
 #include <map>  // For SMS rate limiting
 #include "Config.h"
 #include "Utils.h"
@@ -8,10 +8,12 @@
 #include "TimeManager.h"
 #include "DisplayManager.h"
 #include "LoRaComm.h"
-#include "ModemMQTT.h"        // NEW: MQTT module
-#include "ModemSMS.h"         // NEW: SMS module
+#include "ModemMQTT.h"        // MQTT module
+#include "ModemSMS.h"         // SMS module
 #include "BLEComm.h"
 #include "ScheduleManager.h"
+#include "NodeCommunication.h"  // NEW: Node communication module
+#include "UserCommunication.h"  // NEW: User communication module
 
 // ========== Global Variable Definitions ==========
 SystemConfig sysConfig;
@@ -37,10 +39,12 @@ StorageManager storage;
 TimeManager timeManager;
 DisplayManager displayMgr;
 LoRaComm loraComm;
-ModemMQTT mqtt;               // NEW: MQTT instance
-ModemSMS sms;                 // NEW: SMS instance
+ModemMQTT mqtt;               // MQTT instance
+ModemSMS sms;                 // SMS instance
 BLEComm bleComm;
 ScheduleManager scheduleMgr;
+NodeCommunication nodeComm;   // NEW: Node communication module
+UserCommunication userComm;   // NEW: User communication module
 
 TwoWire WireRTC = TwoWire(1);
 RTC_DS3231 rtc;
@@ -128,211 +132,27 @@ void sendSMSNotification(const String &message, const String &alertKey = "") {
   #endif
 }
 
-// ========== Process SMS Commands ==========
+// ========== Process SMS Commands (Delegated to UserCommunication) ==========
 void processSMSCommands() {
   #if ENABLE_SMS_COMMANDS
-  Serial.println("[SMS] processSMSCommands() called");
-
-  // Add diagnostic - print queue status periodically
+  // Diagnostic logging
   static unsigned long lastDiagnostic = 0;
-  if (millis() - lastDiagnostic > 10000) {  // Every 10 seconds
+  if (millis() - lastDiagnostic > 10000) {
     lastDiagnostic = millis();
     int queuedCount = sms.getUnreadCount();
-    Serial.println("[SMS] 📬 Diagnostic: " + String(queuedCount) + " messages queued, SMS Ready: " +
+    Serial.println("[Main] 📬 SMS Diagnostic: " + String(queuedCount) + " messages queued, SMS Ready: " +
                    String(sms.isReady() ? "YES" : "NO"));
   }
 
-  // Get admin phone from config
-  String adminPhone = "";
-  #ifdef SMS_ALERT_PHONE_1
-  if (String(SMS_ALERT_PHONE_1).length() > 0) {
-    adminPhone = String(SMS_ALERT_PHONE_1);
-  }
-  #endif
-
-  // Process incoming messages (network messages are handled automatically)
-  std::vector<SMSMessage> commandMessages = sms.processIncomingMessages(adminPhone);
-
-  // Process each command message
-  for (SMSMessage &msg : commandMessages) {
-    Serial.println("[SMS] ==================");
-    Serial.println("[SMS] Processing command from: " + msg.sender);
-    Serial.println("[SMS] Command: " + msg.message);
-
-    // Process command
-    String cmd = msg.message;
-    cmd.trim();
-    cmd.toUpperCase();
-
-    String response = "";
-
-    // STATUS command
-    if (cmd == "STATUS") {
-      response = "System OK. ";
-      response += "MQTT: " + String(mqtt.isConnected() ? "ON" : "OFF") + ", ";
-      response += "LoRa: " + String(loraInitialized ? "ON" : "OFF");
-      if (scheduleRunning) {
-        response += ", Schedule: RUNNING";
-      }
-    }
-    // SCHEDULES command
-    else if (cmd == "SCHEDULES") {
-      response = "Schedules: ";
-      int enabledCount = 0;
-      for (auto &sch : schedules) {
-        if (sch.enabled) enabledCount++;
-      }
-      response += String(enabledCount) + "/" + String(schedules.size()) + " enabled";
-    }
-    // START command (for testing)
-    else if (cmd.startsWith("START ")) {
-      String schedId = cmd.substring(6);
-      schedId.trim();
-      response = "Starting schedule: " + schedId;
-      // Trigger schedule logic here
-    }
-    // STOP command
-    else if (cmd == "STOP") {
-      scheduleRunning = false;
-      scheduleLoaded = false;
-      response = "All schedules stopped";
-      publishStatus("EVT|SMS_CMD|STOP");
-    }
-    // ENABLE SMS
-    else if (cmd == "SMS ON") {
-      ENABLE_SMS_BROADCAST = true;
-      response = "SMS alerts enabled";
-    }
-    // DISABLE SMS
-    else if (cmd == "SMS OFF") {
-      ENABLE_SMS_BROADCAST = false;
-      response = "SMS alerts disabled";
-    }
-    // CHECK command - manually scan for messages (bypasses URC queue)
-    else if (cmd == "CHECK" || cmd == "REFRESH") {
-      Serial.println("[SMS] Manual message check requested");
-      // Scan for new messages
-      sms.scanForNewMessages();
-      // Also show diagnostics
-      sms.printSMSDiagnostics();
-      response = "Scanning complete. Check logs.";
-    }
-    // NODE command - send LoRa command
-    // Supports two formats:
-    // 1. "NODE <id> <command>" - e.g., "NODE 1 PING"
-    // 2. "<id> <command>" - e.g., "1 PING" (same as serial commands)
-    else if (cmd.startsWith("NODE ") || (cmd.length() > 0 && isdigit(cmd.charAt(0)))) {
-      int nodeId = 0;
-      String nodeCmd = "";
-
-      // Parse command format
-      if (cmd.startsWith("NODE ")) {
-        // Format: NODE <id> <command>
-        int space1 = cmd.indexOf(' ', 5);
-        if (space1 > 0) {
-          String nodeStr = cmd.substring(5, space1);
-          nodeCmd = cmd.substring(space1 + 1);
-          nodeId = nodeStr.toInt();
-        }
-      } else {
-        // Format: <id> <command>
-        int space1 = cmd.indexOf(' ');
-        if (space1 > 0) {
-          String nodeStr = cmd.substring(0, space1);
-          nodeCmd = cmd.substring(space1 + 1);
-          nodeId = nodeStr.toInt();
-        }
-      }
-
-      // Execute command if valid
-      if (nodeId > 0 && nodeId <= 255 && nodeCmd.length() > 0) {
-        #if ENABLE_LORA
-        if (loraInitialized) {
-          Serial.println("[SMS] ✓ Command parsed successfully");
-          Serial.println("[SMS]   Node ID: " + String(nodeId));
-          Serial.println("[SMS]   Command: " + nodeCmd);
-          Serial.println("[SMS] → Sending via LoRa...");
-
-          bool result = loraComm.sendWithAck(nodeCmd, nodeId, "", 0, 0);
-
-          if (result) {
-            Serial.println("[SMS] ✓✓✓ LoRa SUCCESS ✓✓✓");
-            response = "Node " + String(nodeId) + " OK: " + nodeCmd;
-          } else {
-            Serial.println("[SMS] ✗✗✗ LoRa TIMEOUT ✗✗✗");
-            response = "Node " + String(nodeId) + " TIMEOUT";
-          }
-        } else {
-          Serial.println("[SMS] ❌ LoRa NOT initialized!");
-          response = "LoRa not available";
-        }
-        #else
-        Serial.println("[SMS] ❌ LoRa DISABLED in Config.h");
-        response = "LoRa disabled";
-        #endif
-      } else {
-        Serial.println("[SMS] ❌ Invalid command parameters:");
-        Serial.println("[SMS]   NodeID: " + String(nodeId) + " (valid: 1-255)");
-        Serial.println("[SMS]   Command: '" + nodeCmd + "' (length: " + String(nodeCmd.length()) + ")");
-        response = "Format: <id> <cmd> OR NODE <id> <cmd>";
-      }
-    }
-    // HELP command
-    else if (cmd == "HELP") {
-      response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, CHECK, <id> <cmd> (e.g., 1 PING), HELP";
-    }
-    // Unknown command
-    else {
-      response = "Unknown command. Send HELP for list.";
-    }
-
-    // Send response
-    if (response.length() > 0) {
-      sms.sendSMS(msg.sender, response);
-      Serial.println("[SMS] Response: " + response);
-    }
-
-    // Delete processed message
-    sms.deleteSMS(msg.index);
-
-    // Publish SMS command event
-    publishStatus("EVT|SMS_CMD|" + cmd);
-
-    Serial.println("[SMS] ==================\n");
-  }
+  // Delegate to UserCommunication module
+  userComm.processSMSCommands(&schedules, &scheduleRunning, &scheduleLoaded, &ENABLE_SMS_BROADCAST);
   #endif
 }
 
-// ========== BLE Command Handler Callback ==========
+// ========== BLE Command Handler Callback (Delegated to UserCommunication) ==========
 void handleBLECommand(int node, String command) {
-  Serial.printf("[BLE Handler] Node=%d, Command=%s\n", node, command.c_str());
-  
-  #if ENABLE_LORA
-  if (loraInitialized) {
-    bool result = loraComm.sendWithAck(command, node, "", 0, 0);
-    
-    String response;
-    if (result) {
-      response = "OK|Node " + String(node) + " responded";
-      Serial.println("[BLE Handler] ✓ Success");
-    } else {
-      response = "FAIL|Node " + String(node) + " timeout";
-      Serial.println("[BLE Handler] ✗ Failed");
-    }
-    
-    #if ENABLE_BLE
-    bleComm.notify(response);
-    #endif
-  } else {
-    #if ENABLE_BLE
-    bleComm.notify("ERROR|LoRa not initialized");
-    #endif
-  }
-  #else
-  #if ENABLE_BLE
-  bleComm.notify("ERROR|LoRa disabled");
-  #endif
-  #endif
+  // Delegate to UserCommunication module
+  userComm.processBLECommand(node, command);
 }
 
 // ========== Setup ==========
@@ -389,6 +209,11 @@ void setup() {
   if (loraComm.init()) {
     loraInitialized = true;
     Serial.println("      ✓ LoRa OK");
+
+    // Initialize NodeCommunication module (depends on LoRa)
+    if (nodeComm.init(&loraComm)) {
+      Serial.println("      ✓ NodeComm initialized");
+    }
   } else {
     Serial.println("      ❌ LoRa FAILED");
   }
@@ -452,6 +277,14 @@ void setup() {
     Serial.println("      ✓ BLE OK");
   }
   #endif
+
+  // Initialize UserCommunication module (depends on SMS, BLE, NodeComm)
+  String adminPhone = "";
+  #ifdef SMS_ALERT_PHONE_1
+  adminPhone = String(SMS_ALERT_PHONE_1);
+  #endif
+  userComm.init(&sms, &bleComm, &nodeComm, adminPhone);
+  Serial.println("      ✓ UserComm initialized");
 
   // Initialize Scheduler
   Serial.println("[9/9] Scheduler...");
@@ -523,10 +356,10 @@ void loop() {
     #endif
   }
 
-  // Process LoRa incoming
+  // Process LoRa incoming (via NodeCommunication module)
   #if ENABLE_LORA
   if (loraInitialized) {
-    loraComm.processIncoming();
+    nodeComm.processIncoming();
   }
   #endif
   
@@ -657,12 +490,12 @@ void loop() {
           
           if (node > 0 && node <= 255 && cmd.length() > 0) {
             Serial.printf("[Serial] Node: %d, Command: %s\n", node, cmd.c_str());
-            
+
             #if ENABLE_LORA
-            if (loraInitialized) {
-              Serial.println("[Serial] Sending via LoRa...");
-              bool result = loraComm.sendWithAck(cmd, node, "", 0, 0);
-              
+            if (loraInitialized && nodeComm.isInitialized()) {
+              Serial.println("[Serial] Sending via NodeComm...");
+              bool result = nodeComm.sendCommand(node, cmd);
+
               if (result) {
                 Serial.println("[Serial] ✓✓✓ SUCCESS ✓✓✓");
                 // Publish manual command success (important event)
@@ -678,7 +511,7 @@ void loop() {
                                     "LORA_FAIL_N" + String(node));
               }
             } else {
-              Serial.println("[Serial] ✗ LoRa not initialized");
+              Serial.println("[Serial] ✗ LoRa/NodeComm not initialized");
             }
             #else
             Serial.println("[Serial] ✗ LoRa disabled");
