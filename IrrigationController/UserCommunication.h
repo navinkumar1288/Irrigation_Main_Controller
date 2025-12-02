@@ -1,4 +1,4 @@
-// UserCommunication.h - Handles all user communication (SMS, BLE, Serial)
+// UserCommunication.h - Handles all user communication (SMS, BLE, LoRa, MQTT, Serial)
 #ifndef USER_COMMUNICATION_H
 #define USER_COMMUNICATION_H
 
@@ -7,10 +7,12 @@
 #include "Config.h"
 #include "ModemSMS.h"
 #include "BLEComm.h"
-#include "NodeCommunication.h"
+#include "LoRaComm.h"
+#include "ModemMQTT.h"
 
 // Forward declarations
 class ScheduleManager;
+class NodeCommunication;
 struct Schedule;
 
 // Command result structure
@@ -24,6 +26,8 @@ class UserCommunication {
 private:
   ModemSMS* smsComm;
   BLEComm* bleComm;
+  LoRaComm* loraComm;
+  ModemMQTT* mqttComm;
   NodeCommunication* nodeComm;
   String adminPhone;
 
@@ -38,14 +42,23 @@ private:
   CommandResult handleNodeCommand(const String &cmd);
   CommandResult handleHelpCommand();
 
+  // Internal command routing
+  CommandResult routeCommand(const String &cmd, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void sendResponse(const String &response, const String &channel);
+
 public:
   UserCommunication();
 
   // Initialize with module pointers
-  void init(ModemSMS* sms, BLEComm* ble, NodeCommunication* node, const String &adminPhoneNum);
+  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, NodeCommunication* node, const String &adminPhoneNum);
 
-  // Process commands from different sources
+  // Unified channel processing - checks all enabled communication channels
+  void processAllChannels(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
+
+  // Individual channel processors (called by processAllChannels)
   void processSMSCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void processLoRaCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void processMQTTCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
   void processBLECommand(int nodeId, const String &command);
   void processSerialCommand(const String &input, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded);
 

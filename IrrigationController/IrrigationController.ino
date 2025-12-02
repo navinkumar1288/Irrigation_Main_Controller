@@ -132,23 +132,6 @@ void sendSMSNotification(const String &message, const String &alertKey = "") {
   #endif
 }
 
-// ========== Process SMS Commands (Delegated to UserCommunication) ==========
-void processSMSCommands() {
-  #if ENABLE_SMS_COMMANDS
-  // Diagnostic logging
-  static unsigned long lastDiagnostic = 0;
-  if (millis() - lastDiagnostic > 10000) {
-    lastDiagnostic = millis();
-    int queuedCount = sms.getUnreadCount();
-    Serial.println("[Main] 📬 SMS Diagnostic: " + String(queuedCount) + " messages queued, SMS Ready: " +
-                   String(sms.isReady() ? "YES" : "NO"));
-  }
-
-  // Delegate to UserCommunication module
-  userComm.processSMSCommands(&schedules, &scheduleRunning, &scheduleLoaded, &ENABLE_SMS_BROADCAST);
-  #endif
-}
-
 // ========== BLE Command Handler Callback (Delegated to UserCommunication) ==========
 void handleBLECommand(int node, String command) {
   // Delegate to UserCommunication module
@@ -278,13 +261,33 @@ void setup() {
   }
   #endif
 
-  // Initialize UserCommunication module (depends on SMS, BLE, NodeComm)
+  // Initialize UserCommunication module (depends on SMS, BLE, LoRa, MQTT, NodeComm)
   String adminPhone = "";
   #ifdef SMS_ALERT_PHONE_1
   adminPhone = String(SMS_ALERT_PHONE_1);
   #endif
-  userComm.init(&sms, &bleComm, &nodeComm, adminPhone);
+  userComm.init(&sms, &bleComm, &loraComm, &mqtt, &nodeComm, adminPhone);
   Serial.println("      ✓ UserComm initialized");
+
+  // Set up NodeCommunication callback for business logic
+  nodeComm.setMessageCallback([](const NodeMessage& msg) {
+    // ========== Business Logic for Node Messages ==========
+    if (msg.type == NodeMessageType::TELEMETRY) {
+      Serial.printf("[Business] Node %d Telemetry: BATT=%d%%, BV=%.2fV, SOLV=%.2fV\n",
+                    msg.nodeId, msg.batteryPercent, msg.batteryVoltage, msg.solarVoltage);
+
+      // Low battery alert (business logic)
+      if (msg.batteryPercent < 20) {
+        publishStatus("WARN|LOW_BATT|N=" + String(msg.nodeId) + "|BATT=" + String(msg.batteryPercent));
+        sendSMSNotification("WARN: Low battery on Node " + String(msg.nodeId) +
+                            " - " + String(msg.batteryPercent) + "%",
+                            "LOW_BATT_N" + String(msg.nodeId));
+      }
+    } else if (msg.type == NodeMessageType::AUTO_CLOSE) {
+      Serial.printf("[Business] Node %d Auto-Close: %s\n", msg.nodeId, msg.reason.c_str());
+      publishStatus("EVT|AUTO_CLOSE|N=" + String(msg.nodeId));
+    }
+  });
 
   // Initialize Scheduler
   Serial.println("[9/9] Scheduler...");
@@ -356,13 +359,23 @@ void loop() {
     #endif
   }
 
-  // Process LoRa incoming (via NodeCommunication module)
+  // Process LoRa incoming (via NodeCommunication module - low-level receive)
   #if ENABLE_LORA
   if (loraInitialized) {
-    nodeComm.processIncoming();
+    nodeComm.processIncoming();  // Receives LoRa packets and queues them
+    nodeComm.processNodeMessages();  // Process node-specific messages (STAT, AUTO_CLOSE)
   }
   #endif
-  
+
+  // Process all user communication channels (SMS, BLE, LoRa, MQTT)
+  #if ENABLE_SMS_COMMANDS || ENABLE_LORA || ENABLE_MQTT
+  static unsigned long lastUserCommCheck = 0;
+  if (millis() - lastUserCommCheck > 1000) {  // Check every second
+    lastUserCommCheck = millis();
+    userComm.processAllChannels(&schedules, &scheduleRunning, &scheduleLoaded, &ENABLE_SMS_BROADCAST);
+  }
+  #endif
+
   // Process MQTT background (handles auto-reconnect, URCs)
   #if ENABLE_MQTT
   mqtt.processBackground();
@@ -404,15 +417,6 @@ void loop() {
   }
   #endif
   
-  // Check and process SMS commands periodically
-  #if ENABLE_SMS_COMMANDS
-  if (millis() - lastSMSCheck > SMS_CHECK_INTERVAL_MS) {  // Configurable interval
-    lastSMSCheck = millis();
-    Serial.println("[Loop] → Calling processSMSCommands()");
-    processSMSCommands();
-  }
-  #endif
-
   // Periodically scan for messages (bypasses URC system)
   // This is a workaround if +CMTI URCs are not being received
   #if ENABLE_SMS
@@ -531,99 +535,14 @@ void loop() {
     }
   }
   
-  // ========== Process Queued Messages ==========
+  // ========== Process Queued Messages (Schedules only - node messages handled by NodeCommunication) ==========
   String msg;
   if (incomingQueue.dequeue(msg)) {
     Serial.println("\n[Queue] ==================");
     Serial.println("[Queue] Processing: " + msg);
-    
-    // Handle STAT messages from nodes
-    if (msg.startsWith("STAT|")) {
-      Serial.println("[Queue] ✓✓✓ TELEMETRY ✓✓✓");
-      
-      int nPos = msg.indexOf("N=");
-      if (nPos >= 0) {
-        int comma = msg.indexOf(',', nPos);
-        String nodeIdStr = msg.substring(nPos + 2, comma > 0 ? comma : msg.length());
-        int nodeId = nodeIdStr.toInt();
-        
-        Serial.printf("[Queue] Node %d Telemetry:\n", nodeId);
-        
-        // Parse battery
-        if (msg.indexOf("BATT=") >= 0) {
-          int battPos = msg.indexOf("BATT=");
-          int battEnd = msg.indexOf(',', battPos);
-          String battStr = msg.substring(battPos + 5, battEnd > 0 ? battEnd : msg.length());
-          Serial.println("[Queue]   Battery: " + battStr + "%");
-          
-          // Publish low battery warning (important event)
-          int battPct = battStr.toInt();
-          if (battPct < 20) {
-            publishStatus("WARN|LOW_BATT|N=" + String(nodeId) + "|BATT=" + battStr);
-            // Send SMS alert for low battery (with rate limiting to avoid spam)
-            sendSMSNotification("WARN: Low battery on Node " + String(nodeId) +
-                                " - " + battStr + "%",
-                                "LOW_BATT_N" + String(nodeId));
-          }
-        }
-        
-        // Parse battery voltage
-        if (msg.indexOf("BV=") >= 0) {
-          int bvPos = msg.indexOf("BV=");
-          int bvEnd = msg.indexOf(',', bvPos);
-          String bvStr = msg.substring(bvPos + 3, bvEnd > 0 ? bvEnd : msg.length());
-          Serial.println("[Queue]   Batt Voltage: " + bvStr + "V");
-        }
-        
-        // Parse solar
-        if (msg.indexOf("SOLV=") >= 0) {
-          int solPos = msg.indexOf("SOLV=");
-          int solEnd = msg.indexOf(',', solPos);
-          String solStr = msg.substring(solPos + 5, solEnd > 0 ? solEnd : msg.length());
-          Serial.println("[Queue]   Solar: " + solStr + "V");
-        }
-        
-        // Parse valve states
-        for (int i = 1; i <= 4; i++) {
-          String vKey = "V" + String(i) + "=";
-          if (msg.indexOf(vKey) >= 0) {
-            int vPos = msg.indexOf(vKey);
-            int vEnd = msg.indexOf(',', vPos);
-            String vStr = msg.substring(vPos + vKey.length(), vEnd > 0 ? vEnd : msg.length());
-            Serial.println("[Queue]   Valve " + String(i) + ": " + vStr);
-          }
-        }
-        
-        // Parse moisture sensors
-        for (int i = 1; i <= 4; i++) {
-          String mKey = "M" + String(i) + "=";
-          if (msg.indexOf(mKey) >= 0) {
-            int mPos = msg.indexOf(mKey);
-            int mEnd = msg.indexOf(',', mPos);
-            String mStr = msg.substring(mPos + mKey.length(), mEnd > 0 ? mEnd : msg.length());
-            Serial.println("[Queue]   Moisture " + String(i) + ": " + mStr + "%");
-          }
-        }
-      }
-    }
-    // Handle AUTO_CLOSE
-    else if (msg.startsWith("AUTO_CLOSE|")) {
-      Serial.println("[Queue] ✓✓✓ AUTO_CLOSE ✓✓✓");
-      Serial.println("[Queue] " + msg);
-      
-      // Parse node ID
-      int nPos = msg.indexOf("N=");
-      String nodeStr = "";
-      if (nPos >= 0) {
-        int comma = msg.indexOf(',', nPos);
-        nodeStr = msg.substring(nPos + 2, comma > 0 ? comma : msg.length());
-      }
-      
-      // Publish auto-close event (important event - keep this)
-      publishStatus("EVT|AUTO_CLOSE|N=" + nodeStr);
-    }
-    // Handle schedules
-    else if (msg.indexOf("SCH|") >= 0 || msg.startsWith("{")) {
+
+    // Handle schedules (sent via LoRa or other channels)
+    if (msg.indexOf("SCH|") >= 0 || msg.startsWith("{")) {
       Serial.println("[Queue] Schedule message");
       if (scheduleMgr.validateAndLoad(msg)) {
         Serial.println("[Queue] ✓ Schedule loaded");

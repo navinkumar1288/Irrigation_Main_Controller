@@ -4,7 +4,7 @@
 
 extern MessageQueue incomingQueue;
 
-NodeCommunication::NodeCommunication() : loraComm(nullptr), initialized(false) {}
+NodeCommunication::NodeCommunication() : loraComm(nullptr), initialized(false), messageCallback(nullptr) {}
 
 bool NodeCommunication::init(LoRaComm* lora) {
   if (lora == nullptr) {
@@ -20,6 +20,10 @@ bool NodeCommunication::init(LoRaComm* lora) {
 
 bool NodeCommunication::isInitialized() {
   return initialized;
+}
+
+void NodeCommunication::setMessageCallback(NodeMessageCallback callback) {
+  messageCallback = callback;
 }
 
 // Send command to node (main to node)
@@ -75,4 +79,101 @@ String NodeCommunication::getNodeStatus(int nodeId) {
 
   // Could implement node tracking here
   return "Node " + String(nodeId) + " status unknown";
+}
+
+// Parse node message into structured data
+NodeMessage NodeCommunication::parseNodeMessage(const String &msg) {
+  NodeMessage nodeMsg;
+  nodeMsg.rawMessage = msg;
+  nodeMsg.nodeId = 0;
+  nodeMsg.batteryPercent = 0;
+  nodeMsg.batteryVoltage = 0.0;
+  nodeMsg.solarVoltage = 0.0;
+  nodeMsg.valveStates = "";
+  nodeMsg.moistureLevels = "";
+  nodeMsg.reason = "";
+
+  // Determine message type
+  if (msg.startsWith("STAT|")) {
+    nodeMsg.type = NodeMessageType::TELEMETRY;
+
+    // Parse node ID
+    int nPos = msg.indexOf("N=");
+    if (nPos >= 0) {
+      int comma = msg.indexOf(',', nPos);
+      String nodeIdStr = msg.substring(nPos + 2, comma > 0 ? comma : msg.length());
+      nodeMsg.nodeId = nodeIdStr.toInt();
+    }
+
+    // Parse battery percentage
+    int battPos = msg.indexOf("BATT=");
+    if (battPos >= 0) {
+      int battEnd = msg.indexOf(',', battPos);
+      String battStr = msg.substring(battPos + 5, battEnd > 0 ? battEnd : msg.length());
+      nodeMsg.batteryPercent = battStr.toInt();
+    }
+
+    // Parse battery voltage
+    int bvPos = msg.indexOf("BV=");
+    if (bvPos >= 0) {
+      int bvEnd = msg.indexOf(',', bvPos);
+      String bvStr = msg.substring(bvPos + 3, bvEnd > 0 ? bvEnd : msg.length());
+      nodeMsg.batteryVoltage = bvStr.toFloat();
+    }
+
+    // Parse solar voltage
+    int solPos = msg.indexOf("SOLV=");
+    if (solPos >= 0) {
+      int solEnd = msg.indexOf(',', solPos);
+      String solStr = msg.substring(solPos + 5, solEnd > 0 ? solEnd : msg.length());
+      nodeMsg.solarVoltage = solStr.toFloat();
+    }
+
+  } else if (msg.startsWith("AUTO_CLOSE|")) {
+    nodeMsg.type = NodeMessageType::AUTO_CLOSE;
+
+    // Parse node ID
+    int nPos = msg.indexOf("N=");
+    if (nPos >= 0) {
+      int comma = msg.indexOf(',', nPos);
+      String nodeIdStr = msg.substring(nPos + 2, comma > 0 ? comma : msg.length());
+      nodeMsg.nodeId = nodeIdStr.toInt();
+    }
+
+    nodeMsg.reason = "Auto-close triggered";
+  } else {
+    nodeMsg.type = NodeMessageType::UNKNOWN;
+  }
+
+  return nodeMsg;
+}
+
+// Process node-specific messages from the incoming queue
+void NodeCommunication::processNodeMessages() {
+  if (!initialized) {
+    return;
+  }
+
+  // Dequeue messages and check if they're node messages
+  String msg;
+  while (incomingQueue.dequeue(msg)) {
+    // Check if this is a node message
+    if (msg.startsWith("STAT|") || msg.startsWith("AUTO_CLOSE|")) {
+      Serial.println("[NodeComm] Processing node message: " + msg.substring(0, 30) + "...");
+
+      // Parse the message
+      NodeMessage nodeMsg = parseNodeMessage(msg);
+
+      // Call the business logic callback if set
+      if (messageCallback) {
+        messageCallback(nodeMsg);
+      } else {
+        Serial.println("[NodeComm] ⚠ No callback set for node messages");
+      }
+    } else {
+      // Not a node message, put it back for UserCommunication
+      incomingQueue.enqueue(msg);
+      break;  // Stop processing to avoid infinite loop
+    }
+  }
 }

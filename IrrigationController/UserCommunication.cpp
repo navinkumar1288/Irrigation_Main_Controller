@@ -1,18 +1,21 @@
-// UserCommunication.cpp - Handles all user communication (SMS, BLE, Serial)
+// UserCommunication.cpp - Handles all user communication (SMS, BLE, LoRa, MQTT, Serial)
 #include "UserCommunication.h"
-#include "ModemMQTT.h"
+#include "NodeCommunication.h"
+#include "MessageQueue.h"
 
-extern ModemMQTT mqtt;
+extern MessageQueue incomingQueue;
 extern bool loraInitialized;
 
-UserCommunication::UserCommunication() : smsComm(nullptr), bleComm(nullptr), nodeComm(nullptr) {}
+UserCommunication::UserCommunication() : smsComm(nullptr), bleComm(nullptr), loraComm(nullptr), mqttComm(nullptr), nodeComm(nullptr) {}
 
-void UserCommunication::init(ModemSMS* sms, BLEComm* ble, NodeCommunication* node, const String &adminPhoneNum) {
+void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, NodeCommunication* node, const String &adminPhoneNum) {
   smsComm = sms;
   bleComm = ble;
+  loraComm = lora;
+  mqttComm = mqtt;
   nodeComm = node;
   adminPhone = adminPhoneNum;
-  Serial.println("[UserComm] ✓ Initialized");
+  Serial.println("[UserComm] ✓ Initialized with all channels (SMS, BLE, LoRa, MQTT)");
 }
 
 // ========== Command Handlers ==========
@@ -159,6 +162,62 @@ CommandResult UserCommunication::handleHelpCommand() {
   return result;
 }
 
+// ========== Command Routing ==========
+
+CommandResult UserCommunication::routeCommand(const String &cmdInput, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  String cmd = cmdInput;
+  cmd.trim();
+  cmd.toUpperCase();
+
+  CommandResult result;
+
+  // Route command to appropriate handler
+  if (cmd == "STATUS") {
+    result = handleStatusCommand();
+  } else if (cmd == "SCHEDULES") {
+    result = handleSchedulesCommand(schedules);
+  } else if (cmd.startsWith("START ")) {
+    String schedId = cmd.substring(6);
+    schedId.trim();
+    result = handleStartCommand(schedId);
+  } else if (cmd == "STOP") {
+    result = handleStopCommand(scheduleRunning, scheduleLoaded);
+  } else if (cmd == "SMS ON") {
+    result = handleSMSOnCommand(enableSMSBroadcast);
+  } else if (cmd == "SMS OFF") {
+    result = handleSMSOffCommand(enableSMSBroadcast);
+  } else if (cmd == "CHECK" || cmd == "REFRESH") {
+    result = handleCheckCommand();
+  } else if (cmd.startsWith("NODE ") || (cmd.length() > 0 && isdigit(cmd.charAt(0)))) {
+    result = handleNodeCommand(cmd);
+  } else if (cmd == "HELP") {
+    result = handleHelpCommand();
+  } else {
+    result.success = false;
+    result.response = "Unknown command. Send HELP for list.";
+    result.commandType = "UNKNOWN";
+  }
+
+  return result;
+}
+
+// ========== Unified Channel Processing ==========
+
+void UserCommunication::processAllChannels(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  // Process all enabled communication channels
+  #if ENABLE_SMS_COMMANDS
+  processSMSCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+  #endif
+
+  #if ENABLE_LORA
+  processLoRaCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+  #endif
+
+  #if ENABLE_MQTT
+  processMQTTCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+  #endif
+}
+
 // ========== Process SMS Commands ==========
 
 void UserCommunication::processSMSCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
@@ -176,38 +235,8 @@ void UserCommunication::processSMSCommands(std::vector<Schedule>* schedules, boo
     Serial.println("[UserComm:SMS] From: " + msg.sender);
     Serial.println("[UserComm:SMS] Command: " + msg.message);
 
-    String cmd = msg.message;
-    cmd.trim();
-    cmd.toUpperCase();
-
-    CommandResult result;
-
-    // Route command to appropriate handler
-    if (cmd == "STATUS") {
-      result = handleStatusCommand();
-    } else if (cmd == "SCHEDULES") {
-      result = handleSchedulesCommand(schedules);
-    } else if (cmd.startsWith("START ")) {
-      String schedId = cmd.substring(6);
-      schedId.trim();
-      result = handleStartCommand(schedId);
-    } else if (cmd == "STOP") {
-      result = handleStopCommand(scheduleRunning, scheduleLoaded);
-    } else if (cmd == "SMS ON") {
-      result = handleSMSOnCommand(enableSMSBroadcast);
-    } else if (cmd == "SMS OFF") {
-      result = handleSMSOffCommand(enableSMSBroadcast);
-    } else if (cmd == "CHECK" || cmd == "REFRESH") {
-      result = handleCheckCommand();
-    } else if (cmd.startsWith("NODE ") || (cmd.length() > 0 && isdigit(cmd.charAt(0)))) {
-      result = handleNodeCommand(cmd);
-    } else if (cmd == "HELP") {
-      result = handleHelpCommand();
-    } else {
-      result.success = false;
-      result.response = "Unknown command. Send HELP for list.";
-      result.commandType = "UNKNOWN";
-    }
+    // Route command through unified handler
+    CommandResult result = routeCommand(msg.message, schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
 
     // Send response
     if (result.response.length() > 0) {
@@ -220,6 +249,65 @@ void UserCommunication::processSMSCommands(std::vector<Schedule>* schedules, boo
 
     Serial.println("[UserComm:SMS] ==================\n");
   }
+  #endif
+}
+
+// ========== Process LoRa Commands ==========
+
+void UserCommunication::processLoRaCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  #if ENABLE_LORA
+  if (loraComm == nullptr || !loraInitialized) {
+    return;
+  }
+
+  // Check incoming LoRa queue for user commands (not node messages)
+  // User commands are typically single-line commands from a LoRa device
+  String msg;
+  while (incomingQueue.dequeue(msg)) {
+    // Check if this is a user command (not a node message)
+    // Node messages start with "STAT|" or "AUTO_CLOSE|" - skip those, they're handled by NodeCommunication
+    if (msg.startsWith("STAT|") || msg.startsWith("AUTO_CLOSE|")) {
+      // Put it back for NodeCommunication to process
+      incomingQueue.enqueue(msg);
+      break;  // Stop processing, let NodeCommunication handle it
+    }
+
+    // Check if it's a schedule message
+    if (msg.indexOf("SCH|") >= 0 || msg.startsWith("{")) {
+      Serial.println("\n[UserComm:LoRa] ==================");
+      Serial.println("[UserComm:LoRa] Schedule received via LoRa");
+      Serial.println("[UserComm:LoRa] " + msg);
+      // Schedule handling would go here - for now just log
+      Serial.println("[UserComm:LoRa] ==================\n");
+      continue;
+    }
+
+    // Otherwise, treat it as a user command
+    Serial.println("\n[UserComm:LoRa] ==================");
+    Serial.println("[UserComm:LoRa] Command: " + msg);
+
+    // Route command through unified handler
+    CommandResult result = routeCommand(msg, schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+
+    Serial.println("[UserComm:LoRa] Result: " + result.response);
+    Serial.println("[UserComm:LoRa] ==================\n");
+
+    // Note: No response sent back via LoRa for now (could be added if needed)
+  }
+  #endif
+}
+
+// ========== Process MQTT Commands ==========
+
+void UserCommunication::processMQTTCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  #if ENABLE_MQTT
+  if (mqttComm == nullptr || !mqttComm->isConnected()) {
+    return;
+  }
+
+  // Check if there are any MQTT commands (implementation would depend on how MQTT queues messages)
+  // For now, this is a placeholder as MQTT typically uses callbacks
+  // The actual implementation would process messages from an MQTT command queue
   #endif
 }
 
