@@ -50,33 +50,6 @@ RTC_DS3231 rtc;
 bool rtcAvailable = false;
 bool loraInitialized = false;
 
-// ========== Status Publishing ==========
-void publishStatus(const String &msg) {
-  Serial.println("[Status] " + msg);
-
-  #if ENABLE_MQTT
-  // MQTT enabled - publish to MQTT
-  if (mqtt.isConnected()) {
-    mqtt.publish(MQTT_TOPIC_STATUS, msg);
-    Serial.println("[Status] → Published to MQTT");
-  }
-  #elif ENABLE_SMS
-  // MQTT disabled, SMS enabled - send important status via SMS
-  // Only send critical events to avoid SMS flooding
-  if (msg.indexOf("EVT|") >= 0 || msg.indexOf("BOOT") >= 0 ||
-      msg.indexOf("ERROR") >= 0 || msg.indexOf("FAIL") >= 0) {
-    userComm.sendNotification("Status: " + msg, "");
-    Serial.println("[Status] → Sent via SMS (MQTT disabled)");
-  }
-  #endif
-
-  #if ENABLE_BLE
-  if (bleComm.isConnected()) {
-    bleComm.notify("STAT|" + msg);
-  }
-  #endif
-}
-
 // ========== BLE Command Handler Callback (Delegated to UserCommunication) ==========
 void handleBLECommand(int node, String command) {
   // Delegate to UserCommunication module
@@ -225,10 +198,10 @@ void setup() {
 
       if (result) {
         // Publish command success (business logic)
-        publishStatus("EVT|CMD|N=" + String(nodeId) + "|C=" + command + "|OK");
+        userComm.publishStatus("EVT|CMD|N=" + String(nodeId) + "|C=" + command + "|OK");
       } else {
         // Publish command failure (business logic)
-        publishStatus("ERR|CMD|N=" + String(nodeId) + "|C=" + command + "|FAIL");
+        userComm.publishStatus("ERR|CMD|N=" + String(nodeId) + "|C=" + command + "|FAIL");
 
         // Send notification for failed commands (business logic with rate limiting)
         userComm.sendNotification("ALERT: LoRa command failed. Node: " + String(nodeId) + ", Cmd: " + command,
@@ -251,14 +224,14 @@ void setup() {
 
       // Low battery alert (business logic)
       if (msg.batteryPercent < 20) {
-        publishStatus("WARN|LOW_BATT|N=" + String(msg.nodeId) + "|BATT=" + String(msg.batteryPercent));
+        userComm.publishStatus("WARN|LOW_BATT|N=" + String(msg.nodeId) + "|BATT=" + String(msg.batteryPercent));
         userComm.sendNotification("WARN: Low battery on Node " + String(msg.nodeId) +
                                    " - " + String(msg.batteryPercent) + "%",
                                    "LOW_BATT_N" + String(msg.nodeId));
       }
     } else if (msg.type == NodeMessageType::AUTO_CLOSE) {
       Serial.printf("[Business] Node %d Auto-Close: %s\n", msg.nodeId, msg.reason.c_str());
-      publishStatus("EVT|AUTO_CLOSE|N=" + String(msg.nodeId));
+      userComm.publishStatus("EVT|AUTO_CLOSE|N=" + String(msg.nodeId));
     }
   });
 
@@ -302,13 +275,13 @@ void setup() {
   Serial.println("  <id> <cmd> - Send LoRa command (e.g., 1 PING)");
   Serial.println("  HELP - Show commands");
   Serial.println();
-  
+
   // Publish boot event (important event - keep this)
-  publishStatus("EVT|BOOT|OK|V2.0");
+  userComm.publishStatus("EVT|BOOT|OK|V2.0");
 
   // Send boot notification via enabled communication method
   #if ENABLE_MQTT
-  // MQTT mode - boot notification already sent via publishStatus
+  // MQTT mode - boot notification already sent via userComm.publishStatus
   #elif ENABLE_SMS
   // SMS mode - send boot notification
   userComm.sendNotification("Irrigation Controller v2.0 Started (SMS Mode). LoRa: " +
@@ -403,67 +376,8 @@ void loop() {
   }
   #endif
 
-  // ========== Process Serial Commands ==========
-  if (Serial.available()) {
-    String line = Serial.readStringUntil('\n');
-    line.trim();
-    
-    if (line.length() > 0) {
-      Serial.println("\n[Serial] ==================");
-      Serial.println("[Serial] Input: " + line);
-      
-      // Check for special SMS diagnostic command
-      if (line.equalsIgnoreCase("SMSDIAG") || line.equalsIgnoreCase("SMS DIAG")) {
-        Serial.println("[Serial] Running SMS diagnostics...");
-        #if ENABLE_SMS
-        sms.printSMSDiagnostics();
-        Serial.println("\n[Serial] Forcing message scan...");
-        sms.scanForNewMessages();
-        #else
-        Serial.println("[Serial] SMS is disabled");
-        #endif
-      }
-      // Delete all messages (useful for clearing old PDU messages)
-      else if (line.equalsIgnoreCase("SMSCLEAN") || line.equalsIgnoreCase("SMS CLEAN")) {
-        Serial.println("[Serial] Deleting all SMS messages...");
-        #if ENABLE_SMS
-        if (sms.deleteAllSMS()) {
-          Serial.println("[Serial] ✓ All messages deleted");
-          Serial.println("[Serial] ℹ Please resend your SMS in text format");
-        } else {
-          Serial.println("[Serial] ❌ Failed to delete messages");
-        }
-        #else
-        Serial.println("[Serial] SMS is disabled");
-        #endif
-      }
-      // Reconfigure SMS (useful after cleaning)
-      else if (line.equalsIgnoreCase("SMSCONFIG") || line.equalsIgnoreCase("SMS CONFIG")) {
-        Serial.println("[Serial] Reconfiguring SMS...");
-        #if ENABLE_SMS
-        if (sms.configure()) {
-          Serial.println("[Serial] ✓ SMS reconfigured");
-        } else {
-          Serial.println("[Serial] ❌ SMS configuration failed");
-        }
-        #else
-        Serial.println("[Serial] SMS is disabled");
-        #endif
-      }
-      // Check if it's a schedule
-      else if (line.startsWith("SCH|") || line.startsWith("{")) {
-        Serial.println("[Serial] Schedule detected, queuing...");
-        if (line.indexOf("SRC=") < 0) line += ",SRC=SERIAL";
-        incomingQueue.enqueue(line);
-      }
-      // It's a simple command: <node> <command> - delegate to UserCommunication
-      else {
-        userComm.processSerialCommand(line, &schedules, &scheduleRunning, &scheduleLoaded);
-      }
-      
-      Serial.println("[Serial] ==================\n");
-    }
-  }
+  // ========== Process Serial Commands (Delegated to UserCommunication) ==========
+  userComm.processSerialInput(&schedules, &scheduleRunning, &scheduleLoaded);
   
   // ========== Process Queued Messages (Schedules only - node messages handled by NodeCommunication) ==========
   String msg;
@@ -477,13 +391,13 @@ void loop() {
       if (scheduleMgr.validateAndLoad(msg)) {
         Serial.println("[Queue] ✓ Schedule loaded");
         // Publish schedule load success (important event - keep this)
-        publishStatus("EVT|SCH|LOADED");
+        userComm.publishStatus("EVT|SCH|LOADED");
         // Send notification
         userComm.sendNotification("Schedule loaded successfully", "");
       } else {
         Serial.println("[Queue] ✗ Schedule invalid");
         // Publish schedule load failure (important event - keep this)
-        publishStatus("ERR|SCH|INVALID");
+        userComm.publishStatus("ERR|SCH|INVALID");
         // Send notification
         userComm.sendNotification("ERROR: Invalid schedule format", "");
       }
@@ -526,7 +440,7 @@ void loop() {
           currentStepIndex = -1;
 
           // Publish schedule trigger (important event - keep this)
-          publishStatus("EVT|SCH|TRIGGER|S=" + sch.id);
+          userComm.publishStatus("EVT|SCH|TRIGGER|S=" + sch.id);
 
           // Send notification
           userComm.sendNotification("Schedule started: " + sch.id, "");

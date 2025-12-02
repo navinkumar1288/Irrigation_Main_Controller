@@ -73,6 +73,12 @@ public:
   void sendNotification(const String &message, const String &alertKey = "");  // Unified notification to all enabled channels
   void sendSMSNotification(const String &message);  // SMS only (legacy)
   void sendBLENotification(const String &message);  // BLE only (legacy)
+
+  // Publish status to all available channels (MQTT/SMS/BLE)
+  void publishStatus(const String &msg);
+
+  // Process serial input (handles all serial commands)
+  void processSerialInput(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded);
 };
 
 extern UserCommunication userComm;

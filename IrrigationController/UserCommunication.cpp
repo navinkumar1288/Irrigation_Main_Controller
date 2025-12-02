@@ -439,3 +439,106 @@ void UserCommunication::sendBLENotification(const String &message) {
   }
   #endif
 }
+
+// ========== Publish Status ==========
+
+// Publish status to all available channels (MQTT/SMS/BLE)
+void UserCommunication::publishStatus(const String &msg) {
+  Serial.println("[Status] " + msg);
+
+  #if ENABLE_MQTT
+  // MQTT enabled - publish to MQTT
+  if (mqttComm != nullptr && mqttComm->isConnected()) {
+    mqttComm->publish(MQTT_TOPIC_STATUS, msg);
+    Serial.println("[Status] → Published to MQTT");
+  }
+  #elif ENABLE_SMS
+  // MQTT disabled, SMS enabled - send important status via SMS
+  // Only send critical events to avoid SMS flooding
+  if (msg.indexOf("EVT|") >= 0 || msg.indexOf("BOOT") >= 0 ||
+      msg.indexOf("ERROR") >= 0 || msg.indexOf("FAIL") >= 0) {
+    sendNotification("Status: " + msg, "");
+    Serial.println("[Status] → Sent via SMS (MQTT disabled)");
+  }
+  #endif
+
+  #if ENABLE_BLE
+  if (bleComm != nullptr && bleComm->isConnected()) {
+    bleComm->notify("STAT|" + msg);
+  }
+  #endif
+}
+
+// ========== Process Serial Input ==========
+
+void UserCommunication::processSerialInput(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded) {
+  if (!Serial.available()) {
+    return;
+  }
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+
+  if (line.length() == 0) {
+    return;
+  }
+
+  Serial.println("\n[Serial] ==================");
+  Serial.println("[Serial] Input: " + line);
+
+  // Check for special SMS diagnostic command
+  if (line.equalsIgnoreCase("SMSDIAG") || line.equalsIgnoreCase("SMS DIAG")) {
+    Serial.println("[Serial] Running SMS diagnostics...");
+    #if ENABLE_SMS
+    if (smsComm != nullptr) {
+      smsComm->printSMSDiagnostics();
+      Serial.println("\n[Serial] Forcing message scan...");
+      smsComm->scanForNewMessages();
+    }
+    #else
+    Serial.println("[Serial] SMS is disabled");
+    #endif
+  }
+  // Delete all messages (useful for clearing old PDU messages)
+  else if (line.equalsIgnoreCase("SMSCLEAN") || line.equalsIgnoreCase("SMS CLEAN")) {
+    Serial.println("[Serial] Deleting all SMS messages...");
+    #if ENABLE_SMS
+    if (smsComm != nullptr && smsComm->deleteAllSMS()) {
+      Serial.println("[Serial] ✓ All messages deleted");
+      Serial.println("[Serial] ℹ Please resend your SMS in text format");
+    } else {
+      Serial.println("[Serial] ❌ Failed to delete messages");
+    }
+    #else
+    Serial.println("[Serial] SMS is disabled");
+    #endif
+  }
+  // Reconfigure SMS (useful after cleaning)
+  else if (line.equalsIgnoreCase("SMSCONFIG") || line.equalsIgnoreCase("SMS CONFIG")) {
+    Serial.println("[Serial] Reconfiguring SMS...");
+    #if ENABLE_SMS
+    if (smsComm != nullptr && smsComm->configure()) {
+      Serial.println("[Serial] ✓ SMS reconfigured");
+    } else {
+      Serial.println("[Serial] ❌ SMS configuration failed");
+    }
+    #else
+    Serial.println("[Serial] SMS is disabled");
+    #endif
+  }
+  // Check if it's a schedule
+  else if (line.startsWith("SCH|") || line.startsWith("{")) {
+    Serial.println("[Serial] Schedule detected, queuing...");
+    if (line.indexOf("SRC=") < 0) line += ",SRC=SERIAL";
+
+    // Queue to incoming message queue
+    extern MessageQueue incomingQueue;
+    incomingQueue.enqueue(line);
+  }
+  // It's a simple command: <node> <command> - process as node command
+  else {
+    processSerialCommand(line, schedules, scheduleRunning, scheduleLoaded);
+  }
+
+  Serial.println("[Serial] ==================\n");
+}
