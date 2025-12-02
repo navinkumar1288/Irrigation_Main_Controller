@@ -247,7 +247,7 @@ void ScheduleManager::startIfDue() {
     Serial.println("❌ No node responded, aborting");
 
     // Notify about schedule failure
-    publishStatus("ERR|SCH|START_FAIL|S=" + currentScheduleId + "|NO_NODES");
+    userComm.publishStatus("ERR|SCH|START_FAIL|S=" + currentScheduleId + "|NO_NODES");
 
     // Clear the loaded schedule
     scheduleLoaded = false;

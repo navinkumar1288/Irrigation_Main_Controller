@@ -81,9 +81,7 @@ void HTTPComm::handleRoot() {
   html += "<h2>Available Endpoints:</h2>";
   html += "<ul>";
   html += "<li>GET /status - Get system status</li>";
-  html += "<li>POST /command - Send command (body: {\"command\":\"...\"
-
-})</li>";
+  html += "<li>POST /command - Send command (body: {\"command\":\"...\"})</li>";
   html += "<li>GET /schedules - Get schedules</li>";
   html += "</ul>";
   html += "</body></html>";

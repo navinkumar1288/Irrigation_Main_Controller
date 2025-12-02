@@ -6,9 +6,7 @@
 #include "Utils.h"
 #include "StorageManager.h"
 #include "LoRaComm.h"
-
-// Forward declaration for status publishing
-extern void publishStatus(const String &msg);
+#include "UserCommunication.h"
 
 class ScheduleManager {
 private:
