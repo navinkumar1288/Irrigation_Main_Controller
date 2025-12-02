@@ -82,7 +82,7 @@
 #define LORA_ACK_TIMEOUT_MS 5000
 
 // ========== WiFi Settings ==========
-#define WIFI_SSID "sekarfarm"
+#define WIFI_SSID "sekaranfarm"
 #define WIFI_PASS "welcome123"
 #define WIFI_CONNECT_TIMEOUT_MS 15000
 
