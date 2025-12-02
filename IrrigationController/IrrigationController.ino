@@ -10,6 +10,7 @@
 #include "ModemMQTT.h"        // MQTT module
 #include "ModemSMS.h"         // SMS module
 #include "BLEComm.h"
+#include "WiFiComm.h"         // WiFi module
 #include "HTTPComm.h"         // HTTP API module
 #include "ScheduleManager.h"
 #include "NodeCommunication.h"  // NEW: Node communication module
@@ -42,6 +43,7 @@ LoRaComm loraComm;
 ModemMQTT mqtt;               // MQTT instance
 ModemSMS sms;                 // SMS instance
 BLEComm bleComm;
+WiFiComm wifiComm;            // WiFi instance
 HTTPComm httpComm;            // HTTP API instance
 ScheduleManager scheduleMgr;
 NodeCommunication nodeComm;   // NEW: Node communication module
@@ -173,7 +175,7 @@ void setup() {
   #endif
   
   // Initialize BLE
-  Serial.println("[8/10] BLE...");
+  Serial.println("[8/11] BLE...");
   #if ENABLE_BLE
   if (bleComm.init()) {
     bleComm.setCommandCallback(handleBLECommand);
@@ -181,22 +183,41 @@ void setup() {
   }
   #endif
 
-  // Initialize HTTP API
-  Serial.println("[9/10] HTTP API...");
-  #if ENABLE_HTTP
-  if (httpComm.init(HTTP_SERVER_PORT)) {
-    Serial.println("      ✓ HTTP API started on port " + String(HTTP_SERVER_PORT));
+  // Initialize WiFi
+  Serial.println("[9/11] WiFi...");
+  #if ENABLE_WIFI
+  if (wifiComm.init(WIFI_SSID, WIFI_PASS)) {
+    Serial.println("      ✓ WiFi connected");
+    Serial.println("      ✓ IP: " + wifiComm.getIPAddress());
   } else {
-    Serial.println("      ❌ HTTP API failed");
+    Serial.println("      ⚠ WiFi connection failed (will retry in background)");
   }
   #endif
 
-  // Initialize UserCommunication module (depends on SMS, BLE, LoRa, MQTT, HTTP)
+  // Initialize HTTP API (requires WiFi)
+  Serial.println("[10/11] HTTP API...");
+  #if ENABLE_HTTP
+  #if ENABLE_WIFI
+  if (wifiComm.isConnected()) {
+    if (httpComm.init(HTTP_SERVER_PORT)) {
+      Serial.println("      ✓ HTTP API started on port " + String(HTTP_SERVER_PORT));
+    } else {
+      Serial.println("      ❌ HTTP API failed");
+    }
+  } else {
+    Serial.println("      ⚠ HTTP API skipped (WiFi not connected)");
+  }
+  #else
+  Serial.println("      ⚠ HTTP API requires WiFi (ENABLE_WIFI=0)");
+  #endif
+  #endif
+
+  // Initialize UserCommunication module (depends on SMS, BLE, LoRa, MQTT, WiFi, HTTP)
   String adminPhone = "";
   #ifdef SMS_ALERT_PHONE_1
   adminPhone = String(SMS_ALERT_PHONE_1);
   #endif
-  userComm.init(&sms, &bleComm, &loraComm, &mqtt, &httpComm, adminPhone);
+  userComm.init(&sms, &bleComm, &loraComm, &mqtt, &wifiComm, &httpComm, adminPhone);
   Serial.println("      ✓ UserComm initialized");
 
   // Set up UserCommunication callback for node commands (business logic)
@@ -248,7 +269,7 @@ void setup() {
   });
 
   // Initialize Scheduler
-  Serial.println("[10/10] Scheduler...");
+  Serial.println("[11/11] Scheduler...");
   Serial.println("      ✓ Scheduler ready");
   Serial.printf("      ✓ %d schedules loaded\n", schedules.size());
 
