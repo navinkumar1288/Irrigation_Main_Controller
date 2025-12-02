@@ -542,3 +542,67 @@ void UserCommunication::processSerialInput(std::vector<Schedule>* schedules, boo
 
   Serial.println("[Serial] ==================\n");
 }
+
+// ========== Process Background Tasks ==========
+
+void UserCommunication::processBackground() {
+  // Process MQTT background (handles auto-reconnect, URCs)
+  #if ENABLE_MQTT
+  if (mqttComm != nullptr) {
+    mqttComm->processBackground();
+
+    // Check if MQTT needs reconfiguration after modem restart
+    // Note: needsReconfiguration() now handles throttling and attempt limiting
+    if (mqttComm->needsReconfiguration()) {
+      Serial.println("[UserComm] ⚠ MQTT needs reconfiguration, waiting for modem...");
+      // Wait for modem to be fully initialized (detected via +QIND: SMS DONE)
+      // This typically takes 5-6 seconds after RDY
+      delay(6000);
+      if (mqttComm->configure()) {
+        Serial.println("[UserComm] ✓ MQTT reconfigured successfully");
+      } else {
+        Serial.println("[UserComm] ❌ MQTT reconfiguration failed (will retry with backoff)");
+        // Don't block here - let SMS reconfigure too
+      }
+    }
+  }
+  #endif
+
+  // Process SMS background (handles new messages, URCs)
+  #if ENABLE_SMS
+  if (smsComm != nullptr) {
+    smsComm->processBackground();
+
+    // Auto-reconfigure SMS if modem restarted
+    // This is simple: if SMS becomes not ready, reconfigure it
+    if (!smsComm->isReady()) {
+      static unsigned long lastReconfigAttempt = 0;
+      // Only try once per 5 seconds to avoid spam
+      if (millis() - lastReconfigAttempt > 5000) {
+        lastReconfigAttempt = millis();
+        Serial.println("[UserComm] ⚠ SMS not ready - attempting reconfiguration...");
+        if (smsComm->configure()) {
+          Serial.println("[UserComm] ✓ SMS reconfigured successfully");
+        } else {
+          Serial.println("[UserComm] ❌ SMS reconfiguration failed (will retry)");
+        }
+      }
+    }
+  }
+  #endif
+
+  // Periodically scan for messages (bypasses URC system)
+  // This is a workaround if +CMTI URCs are not being received
+  #if ENABLE_SMS
+  if (smsComm != nullptr) {
+    static unsigned long lastMessageScan = 0;
+    if (millis() - lastMessageScan > 30000) {  // Every 30 seconds
+      lastMessageScan = millis();
+      if (smsComm->isReady()) {
+        Serial.println("[UserComm] → Periodic message scan (URC bypass)");
+        smsComm->scanForNewMessages();
+      }
+    }
+  }
+  #endif
+}

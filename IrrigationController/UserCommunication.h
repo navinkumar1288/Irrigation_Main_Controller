@@ -79,6 +79,9 @@ public:
 
   // Process serial input (handles all serial commands)
   void processSerialInput(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded);
+
+  // Process background tasks for all communication modules (MQTT/SMS auto-reconnect, message scanning)
+  void processBackground();
 };
 
 extern UserCommunication userComm;

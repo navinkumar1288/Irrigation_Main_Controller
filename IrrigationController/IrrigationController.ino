@@ -313,66 +313,14 @@ void loop() {
   }
   #endif
 
-  // Process all user communication channels (SMS, BLE, LoRa, MQTT)
+  // Process all user communication (background, commands, all channels)
+  userComm.processBackground();  // MQTT/SMS auto-reconnect, message scanning
+
   #if ENABLE_SMS_COMMANDS || ENABLE_LORA || ENABLE_MQTT
   static unsigned long lastUserCommCheck = 0;
   if (millis() - lastUserCommCheck > 1000) {  // Check every second
     lastUserCommCheck = millis();
     userComm.processAllChannels(&schedules, &scheduleRunning, &scheduleLoaded, &ENABLE_SMS_BROADCAST);
-  }
-  #endif
-
-  // Process MQTT background (handles auto-reconnect, URCs)
-  #if ENABLE_MQTT
-  mqtt.processBackground();
-
-  // Check if MQTT needs reconfiguration after modem restart
-  // Note: needsReconfiguration() now handles throttling and attempt limiting
-  if (mqtt.needsReconfiguration()) {
-    Serial.println("[Main] ⚠ MQTT needs reconfiguration, waiting for modem...");
-    // Wait for modem to be fully initialized (detected via +QIND: SMS DONE)
-    // This typically takes 5-6 seconds after RDY
-    delay(6000);
-    if (mqtt.configure()) {
-      Serial.println("[Main] ✓ MQTT reconfigured successfully");
-    } else {
-      Serial.println("[Main] ❌ MQTT reconfiguration failed (will retry with backoff)");
-      // Don't block here - let SMS reconfigure too
-    }
-  }
-  #endif
-
-  // Process SMS background (handles new messages, URCs)
-  #if ENABLE_SMS
-  sms.processBackground();
-
-  // Auto-reconfigure SMS if modem restarted
-  // This is simple: if SMS becomes not ready, reconfigure it
-  if (!sms.isReady()) {
-    static unsigned long lastReconfigAttempt = 0;
-    // Only try once per 5 seconds to avoid spam
-    if (millis() - lastReconfigAttempt > 5000) {
-      lastReconfigAttempt = millis();
-      Serial.println("[Main] ⚠ SMS not ready - attempting reconfiguration...");
-      if (sms.configure()) {
-        Serial.println("[Main] ✓ SMS reconfigured successfully");
-      } else {
-        Serial.println("[Main] ❌ SMS reconfiguration failed (will retry)");
-      }
-    }
-  }
-  #endif
-  
-  // Periodically scan for messages (bypasses URC system)
-  // This is a workaround if +CMTI URCs are not being received
-  #if ENABLE_SMS
-  static unsigned long lastMessageScan = 0;
-  if (millis() - lastMessageScan > 30000) {  // Every 30 seconds
-    lastMessageScan = millis();
-    if (sms.isReady()) {
-      Serial.println("[Loop] → Periodic message scan (URC bypass)");
-      sms.scanForNewMessages();
-    }
   }
   #endif
 
