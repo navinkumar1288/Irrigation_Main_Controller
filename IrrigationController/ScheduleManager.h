@@ -7,9 +7,8 @@
 #include "StorageManager.h"
 #include "LoRaComm.h"
 
-// Forward declarations for main controller functions
+// Forward declaration for status publishing
 extern void publishStatus(const String &msg);
-extern void sendSMSNotification(const String &message, const String &alertKey);
 
 class ScheduleManager {
 private:

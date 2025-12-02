@@ -718,3 +718,200 @@ void ModemSMS::processURC(const String& urc) {
 
 // REMOVED: needsReconfiguration() and requeueMessage() methods removed
 // Since modem restart is disabled, these are no longer needed
+
+// ========== Network Provider Detection ==========
+bool ModemSMS::isNetworkProviderMessage(const String &sender) {
+  // Network provider messages typically have:
+  // 1. Short codes (5-6 digits, no + prefix)
+  // 2. Alphabetic sender IDs (AIRTEL, VI, JIO, etc.)
+  // 3. No international format (no + prefix)
+
+  // If sender is empty, treat as network message
+  if (sender.length() == 0) {
+    return true;
+  }
+
+  // If sender doesn't start with +, it's likely a network provider
+  if (sender.charAt(0) != '+') {
+    return true;
+  }
+
+  // If sender starts with + but is very short (5-8 chars), it's a short code
+  if (sender.length() < 9) {
+    return true;
+  }
+
+  // Check for common network provider sender IDs
+  String senderUpper = sender;
+  senderUpper.toUpperCase();
+
+  if (senderUpper.indexOf("AIRTEL") >= 0 ||
+      senderUpper.indexOf("VODAFONE") >= 0 ||
+      senderUpper.indexOf("VI") >= 0 ||
+      senderUpper.indexOf("JIO") >= 0 ||
+      senderUpper.indexOf("BSNL") >= 0 ||
+      senderUpper.indexOf("IDEA") >= 0) {
+    return true;
+  }
+
+  // Not a network provider message
+  return false;
+}
+
+// ========== Process Incoming Messages ==========
+std::vector<SMSMessage> ModemSMS::processIncomingMessages(const String &adminPhone) {
+  std::vector<SMSMessage> commandMessages;
+
+  if (!smsReady) {
+    Serial.println("[SMS] ⚠ SMS not ready - skipping message processing");
+    return commandMessages;
+  }
+
+  // Check for new messages
+  if (!checkNewMessages()) {
+    return commandMessages;
+  }
+
+  // Get actual message indices
+  std::vector<int> indices = getUnreadIndices();
+  Serial.println("[SMS] 📨 Processing " + String(indices.size()) + " unread message(s)");
+
+  // Process each message
+  for (int index : indices) {
+    SMSMessage msg;
+
+    // Try to read the message
+    if (readSMS(index, msg)) {
+      Serial.println("\n[SMS] ==================");
+      Serial.println("[SMS] From: " + msg.sender);
+      Serial.println("[SMS] Time: " + msg.timestamp);
+      Serial.println("[SMS] Message: " + msg.message);
+
+      // Check if message is from network provider
+      if (isNetworkProviderMessage(msg.sender)) {
+        Serial.println("[SMS] → Network provider message detected");
+        Serial.println("[SMS] → Forwarding to admin...");
+
+        // Forward to admin with sender info
+        String forwardMsg = "Network Msg from " + msg.sender + ":\n" + msg.message;
+        if (adminPhone.length() > 0) {
+          sendSMS(adminPhone, forwardMsg);
+          Serial.println("[SMS] ✓ Forwarded to admin: " + adminPhone);
+        }
+
+        // Delete the network message after forwarding
+        deleteSMS(msg.index);
+        Serial.println("[SMS] ✓ Network message deleted");
+        Serial.println("[SMS] ==================\n");
+        continue;  // Skip command processing for network messages
+      }
+
+      // This is a user command message - add to return list
+      commandMessages.push_back(msg);
+      Serial.println("[SMS] → User command message queued for processing");
+      Serial.println("[SMS] ==================\n");
+    } else {
+      // Failed to read message
+      Serial.println("[SMS] ⚠ Failed to read message at index " + String(index));
+      // Delete unreadable message to avoid infinite loop
+      Serial.println("[SMS] ⚠ Deleting unreadable message");
+      deleteSMS(index);
+    }
+  }
+
+  return commandMessages;
+}
+
+// ========== Notification Functions ==========
+
+// Rate limiting check
+bool ModemSMS::shouldSendAlert(const String &alertKey) {
+  if (alertKey.length() == 0) {
+    return true;  // No rate limiting if no key provided
+  }
+
+  unsigned long now = millis();
+
+  if (lastAlertTime.find(alertKey) == lastAlertTime.end()) {
+    // First time seeing this alert
+    lastAlertTime[alertKey] = now;
+    return true;
+  }
+
+  unsigned long timeSinceLastAlert = now - lastAlertTime[alertKey];
+
+  if (timeSinceLastAlert >= SMS_ALERT_RATE_LIMIT_MS) {
+    lastAlertTime[alertKey] = now;
+    return true;
+  }
+
+  Serial.println("[SMS] Alert rate-limited: " + alertKey + " (sent " +
+                 String(timeSinceLastAlert/1000) + "s ago)");
+  return false;
+}
+
+// Send SMS notification with rate limiting (uses Config.h phone numbers)
+bool ModemSMS::sendNotification(const String &message, const String &alertKey) {
+  #if ENABLE_SMS_ALERTS
+  if (!isReady()) {
+    Serial.println("[SMS] ⚠ Modem not ready, cannot send notification");
+    return false;
+  }
+
+  // Check rate limiting if alert key provided
+  if (!shouldSendAlert(alertKey)) {
+    return false;  // Skip sending - rate limited
+  }
+
+  bool sentToAny = false;
+
+  // Send to configured phone numbers (defined in Config.h)
+  #ifdef SMS_ALERT_PHONE_1
+  if (String(SMS_ALERT_PHONE_1).length() > 0) {
+    if (sendSMS(SMS_ALERT_PHONE_1, message)) {
+      Serial.println("[SMS] ✓ Notification sent to: " + String(SMS_ALERT_PHONE_1));
+      sentToAny = true;
+    }
+  }
+  #endif
+
+  #ifdef SMS_ALERT_PHONE_2
+  if (String(SMS_ALERT_PHONE_2).length() > 0) {
+    if (sendSMS(SMS_ALERT_PHONE_2, message)) {
+      Serial.println("[SMS] ✓ Notification sent to: " + String(SMS_ALERT_PHONE_2));
+      sentToAny = true;
+    }
+  }
+  #endif
+
+  return sentToAny;
+  #else
+  return false;  // SMS alerts disabled
+  #endif
+}
+
+// Send SMS notification to specific phone numbers
+bool ModemSMS::sendNotificationToPhones(const String &message, const std::vector<String> &phoneNumbers, const String &alertKey) {
+  if (!isReady()) {
+    Serial.println("[SMS] ⚠ Modem not ready, cannot send notification");
+    return false;
+  }
+
+  // Check rate limiting if alert key provided
+  if (!shouldSendAlert(alertKey)) {
+    return false;  // Skip sending - rate limited
+  }
+
+  bool sentToAny = false;
+
+  for (const String &phone : phoneNumbers) {
+    if (phone.length() > 0) {
+      if (sendSMS(phone, message)) {
+        Serial.println("[SMS] ✓ Notification sent to: " + phone);
+        sentToAny = true;
+      }
+    }
+  }
+
+  return sentToAny;
+}
