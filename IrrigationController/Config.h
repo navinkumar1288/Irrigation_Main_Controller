@@ -12,8 +12,20 @@
 #define ENABLE_MODEM 1
 #define ENABLE_MQTT 0          // Set to 0 to use SMS instead (SMS MODE ACTIVE)
 #define ENABLE_BLE 1
+#define ENABLE_WIFI 1          // WiFi connectivity
+#define ENABLE_HTTP 1          // HTTP REST API (requires WiFi)
 #define ENABLE_DISPLAY 1
 #define ENABLE_RTC 1
+
+// ========== Communication Channel Commands ==========
+// Enable/disable command processing for each channel
+#define ENABLE_BLE_COMMANDS 1
+#define ENABLE_LORA_COMMANDS 1
+#define ENABLE_WIFI_COMMANDS 1
+#define ENABLE_HTTP_COMMANDS 1
+
+// ========== HTTP API Settings ==========
+#define HTTP_SERVER_PORT 80
 
 // ========== Conditional Communication Logic ==========
 // If MQTT is enabled, disable SMS (MQTT takes priority)
@@ -85,6 +97,17 @@
 #define WIFI_SSID "sekaranfarm"
 #define WIFI_PASS "welcome123"
 #define WIFI_CONNECT_TIMEOUT_MS 15000
+
+// ========== Modem WiFi Hotspot Settings ==========
+#define ENABLE_MODEM_HOTSPOT 1        // Enable modem WiFi hotspot (uses modem as AP)
+#define MODEM_HOTSPOT_SSID "sekaranfarm"
+#define MODEM_HOTSPOT_PASS "welcome123"
+#define MODEM_HOTSPOT_AUTH_MODE 4     // 4 = WPA2-PSK
+#define MODEM_HOTSPOT_MAX_STA 5       // Maximum connected stations
+#define MODEM_HOTSPOT_CHANNEL 6       // WiFi channel (1-13)
+#define MODEM_HOTSPOT_BAND 3          // 3 = 2.4GHz
+#define MODEM_HOTSPOT_ENCRYPT 4       // 4 = AES encryption
+#define MODEM_HOTSPOT_DHCP 1          // 1 = Enable DHCP server
 
 // ========== NTP Settings ==========
 #define NTP_SERVER "pool.ntp.org"

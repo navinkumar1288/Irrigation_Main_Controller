@@ -20,6 +20,12 @@ public:
   void processBackground();
   String getSignalQuality();
   String getOperator();
+
+  // WiFi Hotspot configuration (Quectel EC200U)
+  bool configureHotspot(const String &ssid, const String &password);
+  bool startHotspot();
+  bool stopHotspot();
+  String getHotspotStatus();
 };
 
 extern HardwareSerial SerialAT;
