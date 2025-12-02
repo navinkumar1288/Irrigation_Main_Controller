@@ -718,3 +718,106 @@ void ModemSMS::processURC(const String& urc) {
 
 // REMOVED: needsReconfiguration() and requeueMessage() methods removed
 // Since modem restart is disabled, these are no longer needed
+
+// ========== Network Provider Detection ==========
+bool ModemSMS::isNetworkProviderMessage(const String &sender) {
+  // Network provider messages typically have:
+  // 1. Short codes (5-6 digits, no + prefix)
+  // 2. Alphabetic sender IDs (AIRTEL, VI, JIO, etc.)
+  // 3. No international format (no + prefix)
+
+  // If sender is empty, treat as network message
+  if (sender.length() == 0) {
+    return true;
+  }
+
+  // If sender doesn't start with +, it's likely a network provider
+  if (sender.charAt(0) != '+') {
+    return true;
+  }
+
+  // If sender starts with + but is very short (5-8 chars), it's a short code
+  if (sender.length() < 9) {
+    return true;
+  }
+
+  // Check for common network provider sender IDs
+  String senderUpper = sender;
+  senderUpper.toUpperCase();
+
+  if (senderUpper.indexOf("AIRTEL") >= 0 ||
+      senderUpper.indexOf("VODAFONE") >= 0 ||
+      senderUpper.indexOf("VI") >= 0 ||
+      senderUpper.indexOf("JIO") >= 0 ||
+      senderUpper.indexOf("BSNL") >= 0 ||
+      senderUpper.indexOf("IDEA") >= 0) {
+    return true;
+  }
+
+  // Not a network provider message
+  return false;
+}
+
+// ========== Process Incoming Messages ==========
+std::vector<SMSMessage> ModemSMS::processIncomingMessages(const String &adminPhone) {
+  std::vector<SMSMessage> commandMessages;
+
+  if (!smsReady) {
+    Serial.println("[SMS] ⚠ SMS not ready - skipping message processing");
+    return commandMessages;
+  }
+
+  // Check for new messages
+  if (!checkNewMessages()) {
+    return commandMessages;
+  }
+
+  // Get actual message indices
+  std::vector<int> indices = getUnreadIndices();
+  Serial.println("[SMS] 📨 Processing " + String(indices.size()) + " unread message(s)");
+
+  // Process each message
+  for (int index : indices) {
+    SMSMessage msg;
+
+    // Try to read the message
+    if (readSMS(index, msg)) {
+      Serial.println("\n[SMS] ==================");
+      Serial.println("[SMS] From: " + msg.sender);
+      Serial.println("[SMS] Time: " + msg.timestamp);
+      Serial.println("[SMS] Message: " + msg.message);
+
+      // Check if message is from network provider
+      if (isNetworkProviderMessage(msg.sender)) {
+        Serial.println("[SMS] → Network provider message detected");
+        Serial.println("[SMS] → Forwarding to admin...");
+
+        // Forward to admin with sender info
+        String forwardMsg = "Network Msg from " + msg.sender + ":\n" + msg.message;
+        if (adminPhone.length() > 0) {
+          sendSMS(adminPhone, forwardMsg);
+          Serial.println("[SMS] ✓ Forwarded to admin: " + adminPhone);
+        }
+
+        // Delete the network message after forwarding
+        deleteSMS(msg.index);
+        Serial.println("[SMS] ✓ Network message deleted");
+        Serial.println("[SMS] ==================\n");
+        continue;  // Skip command processing for network messages
+      }
+
+      // This is a user command message - add to return list
+      commandMessages.push_back(msg);
+      Serial.println("[SMS] → User command message queued for processing");
+      Serial.println("[SMS] ==================\n");
+    } else {
+      // Failed to read message
+      Serial.println("[SMS] ⚠ Failed to read message at index " + String(index));
+      // Delete unreadable message to avoid infinite loop
+      Serial.println("[SMS] ⚠ Deleting unreadable message");
+      deleteSMS(index);
+    }
+  }
+
+  return commandMessages;
+}

@@ -128,45 +128,6 @@ void sendSMSNotification(const String &message, const String &alertKey = "") {
   #endif
 }
 
-// ========== Check if Message is from Network Provider ==========
-bool isNetworkProviderMessage(const String &sender) {
-  // Network provider messages typically have:
-  // 1. Short codes (5-6 digits, no + prefix)
-  // 2. Alphabetic sender IDs (AIRTEL, VI, JIO, etc.)
-  // 3. No international format (no + prefix)
-
-  // If sender is empty, treat as network message
-  if (sender.length() == 0) {
-    return true;
-  }
-
-  // If sender doesn't start with +, it's likely a network provider
-  if (sender.charAt(0) != '+') {
-    return true;
-  }
-
-  // If sender starts with + but is very short (5-8 chars), it's a short code
-  if (sender.length() < 9) {
-    return true;
-  }
-
-  // Check for common network provider sender IDs
-  String senderUpper = sender;
-  senderUpper.toUpperCase();
-
-  if (senderUpper.indexOf("AIRTEL") >= 0 ||
-      senderUpper.indexOf("VODAFONE") >= 0 ||
-      senderUpper.indexOf("VI") >= 0 ||
-      senderUpper.indexOf("JIO") >= 0 ||
-      senderUpper.indexOf("BSNL") >= 0 ||
-      senderUpper.indexOf("IDEA") >= 0) {
-    return true;
-  }
-
-  // Not a network provider message
-  return false;
-}
-
 // ========== Process SMS Commands ==========
 void processSMSCommands() {
   #if ENABLE_SMS_COMMANDS
@@ -181,204 +142,163 @@ void processSMSCommands() {
                    String(sms.isReady() ? "YES" : "NO"));
   }
 
-  if (!sms.isReady()) {
-    Serial.println("[SMS] ⚠ SMS not ready - skipping message processing");
-    return;  // SMS not ready - messages will wait in queue
+  // Get admin phone from config
+  String adminPhone = "";
+  #ifdef SMS_ALERT_PHONE_1
+  if (String(SMS_ALERT_PHONE_1).length() > 0) {
+    adminPhone = String(SMS_ALERT_PHONE_1);
   }
+  #endif
 
-  // Check for new messages
-  Serial.println("[SMS] Checking for new messages...");
-  bool hasNewMessages = sms.checkNewMessages();
-  Serial.println("[SMS] checkNewMessages() returned: " + String(hasNewMessages ? "TRUE" : "FALSE"));
+  // Process incoming messages (network messages are handled automatically)
+  std::vector<SMSMessage> commandMessages = sms.processIncomingMessages(adminPhone);
 
-  if (hasNewMessages) {
-    // Get actual message indices (not sequential like 1,2,3 but actual indices like 34,35,etc)
-    std::vector<int> indices = sms.getUnreadIndices();
-    Serial.println("[SMS] 📨 Processing " + String(indices.size()) + " unread message(s)");
+  // Process each command message
+  for (SMSMessage &msg : commandMessages) {
+    Serial.println("[SMS] ==================");
+    Serial.println("[SMS] Processing command from: " + msg.sender);
+    Serial.println("[SMS] Command: " + msg.message);
 
-    // Process each message by actual index
-    for (int index : indices) {
-      SMSMessage msg;
+    // Process command
+    String cmd = msg.message;
+    cmd.trim();
+    cmd.toUpperCase();
 
-      // Try to read the message
-      if (sms.readSMS(index, msg)) {
-        Serial.println("\n[SMS] ==================");
-        Serial.println("[SMS] From: " + msg.sender);
-        Serial.println("[SMS] Time: " + msg.timestamp);
-        Serial.println("[SMS] Message: " + msg.message);
+    String response = "";
 
-        // Check if message is from network provider
-        if (isNetworkProviderMessage(msg.sender)) {
-          Serial.println("[SMS] → Network provider message detected");
-          Serial.println("[SMS] → Forwarding to admin...");
-
-          // Forward to admin with sender info
-          String forwardMsg = "Network Msg from " + msg.sender + ":\n" + msg.message;
-          #ifdef SMS_ALERT_PHONE_1
-          if (String(SMS_ALERT_PHONE_1).length() > 0) {
-            sms.sendSMS(SMS_ALERT_PHONE_1, forwardMsg);
-            Serial.println("[SMS] ✓ Forwarded to admin: " + String(SMS_ALERT_PHONE_1));
-          }
-          #endif
-
-          // Delete the network message after forwarding
-          sms.deleteSMS(msg.index);
-          Serial.println("[SMS] ✓ Network message deleted");
-          Serial.println("[SMS] ==================\n");
-          continue;  // Skip command processing for network messages
-        }
-
-        // Process command (only for non-network messages)
-        String cmd = msg.message;
-        cmd.trim();
-        cmd.toUpperCase();
-        
-        String response = "";
-        
-        // STATUS command
-        if (cmd == "STATUS") {
-          response = "System OK. ";
-          response += "MQTT: " + String(mqtt.isConnected() ? "ON" : "OFF") + ", ";
-          response += "LoRa: " + String(loraInitialized ? "ON" : "OFF");
-          if (scheduleRunning) {
-            response += ", Schedule: RUNNING";
-          }
-        }
-        // SCHEDULES command
-        else if (cmd == "SCHEDULES") {
-          response = "Schedules: ";
-          int enabledCount = 0;
-          for (auto &sch : schedules) {
-            if (sch.enabled) enabledCount++;
-          }
-          response += String(enabledCount) + "/" + String(schedules.size()) + " enabled";
-        }
-        // START command (for testing)
-        else if (cmd.startsWith("START ")) {
-          String schedId = cmd.substring(6);
-          schedId.trim();
-          response = "Starting schedule: " + schedId;
-          // Trigger schedule logic here
-        }
-        // STOP command
-        else if (cmd == "STOP") {
-          scheduleRunning = false;
-          scheduleLoaded = false;
-          response = "All schedules stopped";
-          publishStatus("EVT|SMS_CMD|STOP");
-        }
-        // ENABLE SMS
-        else if (cmd == "SMS ON") {
-          ENABLE_SMS_BROADCAST = true;
-          response = "SMS alerts enabled";
-        }
-        // DISABLE SMS
-        else if (cmd == "SMS OFF") {
-          ENABLE_SMS_BROADCAST = false;
-          response = "SMS alerts disabled";
-        }
-        // CHECK command - manually scan for messages (bypasses URC queue)
-        else if (cmd == "CHECK" || cmd == "REFRESH") {
-          Serial.println("[SMS] Manual message check requested");
-          // Scan for new messages
-          sms.scanForNewMessages();
-          // Also show diagnostics
-          sms.printSMSDiagnostics();
-          response = "Scanning complete. Check logs.";
-        }
-        // NODE command - send LoRa command
-        // Supports two formats:
-        // 1. "NODE <id> <command>" - e.g., "NODE 1 PING"
-        // 2. "<id> <command>" - e.g., "1 PING" (same as serial commands)
-        else if (cmd.startsWith("NODE ") || (cmd.length() > 0 && isdigit(cmd.charAt(0)))) {
-          int nodeId = 0;
-          String nodeCmd = "";
-
-          // Parse command format
-          if (cmd.startsWith("NODE ")) {
-            // Format: NODE <id> <command>
-            int space1 = cmd.indexOf(' ', 5);
-            if (space1 > 0) {
-              String nodeStr = cmd.substring(5, space1);
-              nodeCmd = cmd.substring(space1 + 1);
-              nodeId = nodeStr.toInt();
-            }
-          } else {
-            // Format: <id> <command>
-            int space1 = cmd.indexOf(' ');
-            if (space1 > 0) {
-              String nodeStr = cmd.substring(0, space1);
-              nodeCmd = cmd.substring(space1 + 1);
-              nodeId = nodeStr.toInt();
-            }
-          }
-
-          // Execute command if valid
-          if (nodeId > 0 && nodeId <= 255 && nodeCmd.length() > 0) {
-            #if ENABLE_LORA
-            if (loraInitialized) {
-              Serial.println("[SMS] ==================");
-              Serial.println("[SMS] ✓ Command parsed successfully");
-              Serial.println("[SMS]   Node ID: " + String(nodeId));
-              Serial.println("[SMS]   Command: " + nodeCmd);
-              Serial.println("[SMS] → Sending via LoRa...");
-
-              bool result = loraComm.sendWithAck(nodeCmd, nodeId, "", 0, 0);
-
-              if (result) {
-                Serial.println("[SMS] ✓✓✓ LoRa SUCCESS ✓✓✓");
-                response = "Node " + String(nodeId) + " OK: " + nodeCmd;
-              } else {
-                Serial.println("[SMS] ✗✗✗ LoRa TIMEOUT ✗✗✗");
-                response = "Node " + String(nodeId) + " TIMEOUT";
-              }
-            } else {
-              Serial.println("[SMS] ❌ LoRa NOT initialized!");
-              Serial.println("[SMS]   loraInitialized = false");
-              response = "LoRa not available";
-            }
-            #else
-            Serial.println("[SMS] ❌ LoRa DISABLED in Config.h");
-            Serial.println("[SMS]   ENABLE_LORA is not set");
-            response = "LoRa disabled";
-            #endif
-          } else {
-            Serial.println("[SMS] ❌ Invalid command parameters:");
-            Serial.println("[SMS]   NodeID: " + String(nodeId) + " (valid: 1-255)");
-            Serial.println("[SMS]   Command: '" + nodeCmd + "' (length: " + String(nodeCmd.length()) + ")");
-            response = "Format: <id> <cmd> OR NODE <id> <cmd>";
-          }
-        }
-        // HELP command
-        else if (cmd == "HELP") {
-          response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, CHECK, <id> <cmd> (e.g., 1 PING), HELP";
-        }
-        // Unknown command
-        else {
-          response = "Unknown command. Send HELP for list.";
-        }
-        
-        // Send response
-        if (response.length() > 0) {
-          sms.sendSMS(msg.sender, response);
-          Serial.println("[SMS] Response: " + response);
-        }
-        
-        // Delete processed message
-        sms.deleteSMS(msg.index);
-        
-        Serial.println("[SMS] ==================\n");
-
-        // Publish SMS command event
-        publishStatus("EVT|SMS_CMD|" + cmd);
-      } else {
-        // Failed to read message
-        Serial.println("[SMS] ⚠ Failed to read message at index " + String(index));
-        // Delete unreadable message to avoid infinite loop
-        Serial.println("[SMS] ⚠ Deleting unreadable message");
-        sms.deleteSMS(index);
+    // STATUS command
+    if (cmd == "STATUS") {
+      response = "System OK. ";
+      response += "MQTT: " + String(mqtt.isConnected() ? "ON" : "OFF") + ", ";
+      response += "LoRa: " + String(loraInitialized ? "ON" : "OFF");
+      if (scheduleRunning) {
+        response += ", Schedule: RUNNING";
       }
     }
+    // SCHEDULES command
+    else if (cmd == "SCHEDULES") {
+      response = "Schedules: ";
+      int enabledCount = 0;
+      for (auto &sch : schedules) {
+        if (sch.enabled) enabledCount++;
+      }
+      response += String(enabledCount) + "/" + String(schedules.size()) + " enabled";
+    }
+    // START command (for testing)
+    else if (cmd.startsWith("START ")) {
+      String schedId = cmd.substring(6);
+      schedId.trim();
+      response = "Starting schedule: " + schedId;
+      // Trigger schedule logic here
+    }
+    // STOP command
+    else if (cmd == "STOP") {
+      scheduleRunning = false;
+      scheduleLoaded = false;
+      response = "All schedules stopped";
+      publishStatus("EVT|SMS_CMD|STOP");
+    }
+    // ENABLE SMS
+    else if (cmd == "SMS ON") {
+      ENABLE_SMS_BROADCAST = true;
+      response = "SMS alerts enabled";
+    }
+    // DISABLE SMS
+    else if (cmd == "SMS OFF") {
+      ENABLE_SMS_BROADCAST = false;
+      response = "SMS alerts disabled";
+    }
+    // CHECK command - manually scan for messages (bypasses URC queue)
+    else if (cmd == "CHECK" || cmd == "REFRESH") {
+      Serial.println("[SMS] Manual message check requested");
+      // Scan for new messages
+      sms.scanForNewMessages();
+      // Also show diagnostics
+      sms.printSMSDiagnostics();
+      response = "Scanning complete. Check logs.";
+    }
+    // NODE command - send LoRa command
+    // Supports two formats:
+    // 1. "NODE <id> <command>" - e.g., "NODE 1 PING"
+    // 2. "<id> <command>" - e.g., "1 PING" (same as serial commands)
+    else if (cmd.startsWith("NODE ") || (cmd.length() > 0 && isdigit(cmd.charAt(0)))) {
+      int nodeId = 0;
+      String nodeCmd = "";
+
+      // Parse command format
+      if (cmd.startsWith("NODE ")) {
+        // Format: NODE <id> <command>
+        int space1 = cmd.indexOf(' ', 5);
+        if (space1 > 0) {
+          String nodeStr = cmd.substring(5, space1);
+          nodeCmd = cmd.substring(space1 + 1);
+          nodeId = nodeStr.toInt();
+        }
+      } else {
+        // Format: <id> <command>
+        int space1 = cmd.indexOf(' ');
+        if (space1 > 0) {
+          String nodeStr = cmd.substring(0, space1);
+          nodeCmd = cmd.substring(space1 + 1);
+          nodeId = nodeStr.toInt();
+        }
+      }
+
+      // Execute command if valid
+      if (nodeId > 0 && nodeId <= 255 && nodeCmd.length() > 0) {
+        #if ENABLE_LORA
+        if (loraInitialized) {
+          Serial.println("[SMS] ✓ Command parsed successfully");
+          Serial.println("[SMS]   Node ID: " + String(nodeId));
+          Serial.println("[SMS]   Command: " + nodeCmd);
+          Serial.println("[SMS] → Sending via LoRa...");
+
+          bool result = loraComm.sendWithAck(nodeCmd, nodeId, "", 0, 0);
+
+          if (result) {
+            Serial.println("[SMS] ✓✓✓ LoRa SUCCESS ✓✓✓");
+            response = "Node " + String(nodeId) + " OK: " + nodeCmd;
+          } else {
+            Serial.println("[SMS] ✗✗✗ LoRa TIMEOUT ✗✗✗");
+            response = "Node " + String(nodeId) + " TIMEOUT";
+          }
+        } else {
+          Serial.println("[SMS] ❌ LoRa NOT initialized!");
+          response = "LoRa not available";
+        }
+        #else
+        Serial.println("[SMS] ❌ LoRa DISABLED in Config.h");
+        response = "LoRa disabled";
+        #endif
+      } else {
+        Serial.println("[SMS] ❌ Invalid command parameters:");
+        Serial.println("[SMS]   NodeID: " + String(nodeId) + " (valid: 1-255)");
+        Serial.println("[SMS]   Command: '" + nodeCmd + "' (length: " + String(nodeCmd.length()) + ")");
+        response = "Format: <id> <cmd> OR NODE <id> <cmd>";
+      }
+    }
+    // HELP command
+    else if (cmd == "HELP") {
+      response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, CHECK, <id> <cmd> (e.g., 1 PING), HELP";
+    }
+    // Unknown command
+    else {
+      response = "Unknown command. Send HELP for list.";
+    }
+
+    // Send response
+    if (response.length() > 0) {
+      sms.sendSMS(msg.sender, response);
+      Serial.println("[SMS] Response: " + response);
+    }
+
+    // Delete processed message
+    sms.deleteSMS(msg.index);
+
+    // Publish SMS command event
+    publishStatus("EVT|SMS_CMD|" + cmd);
+
+    Serial.println("[SMS] ==================\n");
   }
   #endif
 }

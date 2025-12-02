@@ -26,6 +26,7 @@ private:
   bool isValidPhoneNumber(const String &phoneNumber);
   void handleNewMessageURC(int index);  // Handle +CMTI URC
   void processURC(const String& urc);  // Process a single URC (from buffer or serial)
+  bool isNetworkProviderMessage(const String &sender);  // Check if message is from network provider
 
 public:
   ModemSMS();
@@ -41,6 +42,7 @@ public:
   bool isReady();
   void printSMSDiagnostics();  // Print SMS configuration and status
   void scanForNewMessages();  // Actively poll modem for new messages (bypasses URCs)
+  std::vector<SMSMessage> processIncomingMessages(const String &adminPhone);  // Process incoming messages, return command messages
 };
 
 extern ModemSMS modemSMS;
