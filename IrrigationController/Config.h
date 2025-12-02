@@ -98,6 +98,17 @@
 #define WIFI_PASS "welcome123"
 #define WIFI_CONNECT_TIMEOUT_MS 15000
 
+// ========== Modem WiFi Hotspot Settings ==========
+#define ENABLE_MODEM_HOTSPOT 1        // Enable modem WiFi hotspot (uses modem as AP)
+#define MODEM_HOTSPOT_SSID "sekaranfarm"
+#define MODEM_HOTSPOT_PASS "welcome123"
+#define MODEM_HOTSPOT_AUTH_MODE 4     // 4 = WPA2-PSK
+#define MODEM_HOTSPOT_MAX_STA 5       // Maximum connected stations
+#define MODEM_HOTSPOT_CHANNEL 6       // WiFi channel (1-13)
+#define MODEM_HOTSPOT_BAND 3          // 3 = 2.4GHz
+#define MODEM_HOTSPOT_ENCRYPT 4       // 4 = AES encryption
+#define MODEM_HOTSPOT_DHCP 1          // 1 = Enable DHCP server
+
 // ========== NTP Settings ==========
 #define NTP_SERVER "pool.ntp.org"
 #define GMT_OFFSET_SEC (5.5 * 3600)   // IST = UTC+5:30

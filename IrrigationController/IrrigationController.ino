@@ -169,6 +169,35 @@ void setup() {
       Serial.println("      ❌ MQTT configuration failed");
     }
     #endif
+
+    // Configure WiFi Hotspot (if enabled)
+    // This turns the modem into a WiFi access point
+    #if ENABLE_MODEM_HOTSPOT
+    Serial.println("      → Configuring modem WiFi hotspot...");
+    #if ENABLE_MQTT
+    if (mqtt.configureHotspot(MODEM_HOTSPOT_SSID, MODEM_HOTSPOT_PASS)) {
+      if (mqtt.startHotspot()) {
+        Serial.println("      ✓ Modem hotspot active");
+        Serial.println("      ✓ SSID: " + String(MODEM_HOTSPOT_SSID));
+      } else {
+        Serial.println("      ⚠ Hotspot start failed");
+      }
+    } else {
+      Serial.println("      ⚠ Hotspot configuration failed");
+    }
+    #elif ENABLE_SMS
+    if (sms.configureHotspot(MODEM_HOTSPOT_SSID, MODEM_HOTSPOT_PASS)) {
+      if (sms.startHotspot()) {
+        Serial.println("      ✓ Modem hotspot active");
+        Serial.println("      ✓ SSID: " + String(MODEM_HOTSPOT_SSID));
+      } else {
+        Serial.println("      ⚠ Hotspot start failed");
+      }
+    } else {
+      Serial.println("      ⚠ Hotspot configuration failed");
+    }
+    #endif
+    #endif
   } else {
     Serial.println("      ❌ Modem initialization failed");
   }
