@@ -70,9 +70,9 @@ public:
   void processSerialCommand(const String &input, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded);
 
   // Send notifications
-  void sendNotification(const String &message, const String &channel = "all");
-  void sendSMSNotification(const String &message);
-  void sendBLENotification(const String &message);
+  void sendNotification(const String &message, const String &alertKey = "");  // Unified notification to all enabled channels
+  void sendSMSNotification(const String &message);  // SMS only (legacy)
+  void sendBLENotification(const String &message);  // BLE only (legacy)
 };
 
 extern UserCommunication userComm;

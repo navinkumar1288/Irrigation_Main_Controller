@@ -1,6 +1,5 @@
 // IrrigationController.ino - Refactored with UserCommunication and NodeCommunication modules
 // Clean separation: User interaction, Node communication, and Business logic
-#include <map>  // For SMS rate limiting
 #include "Config.h"
 #include "Utils.h"
 #include "MessageQueue.h"
@@ -51,31 +50,6 @@ RTC_DS3231 rtc;
 bool rtcAvailable = false;
 bool loraInitialized = false;
 
-// ========== SMS Rate Limiting ==========
-// Track last SMS alert time by key to prevent spam
-std::map<String, unsigned long> lastSMSAlertTime;
-
-bool shouldSendSMSAlert(const String &alertKey) {
-  unsigned long now = millis();
-
-  if (lastSMSAlertTime.find(alertKey) == lastSMSAlertTime.end()) {
-    // First time seeing this alert
-    lastSMSAlertTime[alertKey] = now;
-    return true;
-  }
-
-  unsigned long timeSinceLastAlert = now - lastSMSAlertTime[alertKey];
-
-  if (timeSinceLastAlert >= SMS_ALERT_RATE_LIMIT_MS) {
-    lastSMSAlertTime[alertKey] = now;
-    return true;
-  }
-
-  Serial.println("[SMS] Alert rate-limited: " + alertKey + " (sent " +
-                 String(timeSinceLastAlert/1000) + "s ago)");
-  return false;
-}
-
 // ========== Status Publishing ==========
 void publishStatus(const String &msg) {
   Serial.println("[Status] " + msg);
@@ -91,7 +65,7 @@ void publishStatus(const String &msg) {
   // Only send critical events to avoid SMS flooding
   if (msg.indexOf("EVT|") >= 0 || msg.indexOf("BOOT") >= 0 ||
       msg.indexOf("ERROR") >= 0 || msg.indexOf("FAIL") >= 0) {
-    sendSMSNotification("Status: " + msg, "");
+    userComm.sendNotification("Status: " + msg, "");
     Serial.println("[Status] → Sent via SMS (MQTT disabled)");
   }
   #endif
@@ -100,35 +74,6 @@ void publishStatus(const String &msg) {
   if (bleComm.isConnected()) {
     bleComm.notify("STAT|" + msg);
   }
-  #endif
-}
-
-// ========== SMS Notification Function ==========
-void sendSMSNotification(const String &message, const String &alertKey = "") {
-  #if ENABLE_SMS_ALERTS
-  if (!sms.isReady() || !ENABLE_SMS_BROADCAST) {
-    return;
-  }
-
-  // Check rate limiting if alert key provided
-  if (alertKey.length() > 0 && !shouldSendSMSAlert(alertKey)) {
-    return;  // Skip sending - rate limited
-  }
-
-  // Send to configured phone numbers (defined in Config.h)
-  #ifdef SMS_ALERT_PHONE_1
-  if (String(SMS_ALERT_PHONE_1).length() > 0) {
-    sms.sendSMS(SMS_ALERT_PHONE_1, message);
-    Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_1));
-  }
-  #endif
-
-  #ifdef SMS_ALERT_PHONE_2
-  if (String(SMS_ALERT_PHONE_2).length() > 0) {
-    sms.sendSMS(SMS_ALERT_PHONE_2, message);
-    Serial.println("[SMS] Sent to: " + String(SMS_ALERT_PHONE_2));
-  }
-  #endif
   #endif
 }
 
@@ -285,9 +230,9 @@ void setup() {
         // Publish command failure (business logic)
         publishStatus("ERR|CMD|N=" + String(nodeId) + "|C=" + command + "|FAIL");
 
-        // Send SMS alert for failed commands (business logic with rate limiting)
-        sendSMSNotification("ALERT: LoRa command failed. Node: " + String(nodeId) + ", Cmd: " + command,
-                            "LORA_FAIL_N" + String(nodeId));
+        // Send notification for failed commands (business logic with rate limiting)
+        userComm.sendNotification("ALERT: LoRa command failed. Node: " + String(nodeId) + ", Cmd: " + command,
+                                   "LORA_FAIL_N" + String(nodeId));
       }
 
       return result;
@@ -307,9 +252,9 @@ void setup() {
       // Low battery alert (business logic)
       if (msg.batteryPercent < 20) {
         publishStatus("WARN|LOW_BATT|N=" + String(msg.nodeId) + "|BATT=" + String(msg.batteryPercent));
-        sendSMSNotification("WARN: Low battery on Node " + String(msg.nodeId) +
-                            " - " + String(msg.batteryPercent) + "%",
-                            "LOW_BATT_N" + String(msg.nodeId));
+        userComm.sendNotification("WARN: Low battery on Node " + String(msg.nodeId) +
+                                   " - " + String(msg.batteryPercent) + "%",
+                                   "LOW_BATT_N" + String(msg.nodeId));
       }
     } else if (msg.type == NodeMessageType::AUTO_CLOSE) {
       Serial.printf("[Business] Node %d Auto-Close: %s\n", msg.nodeId, msg.reason.c_str());
@@ -366,8 +311,8 @@ void setup() {
   // MQTT mode - boot notification already sent via publishStatus
   #elif ENABLE_SMS
   // SMS mode - send boot notification
-  sendSMSNotification("Irrigation Controller v2.0 Started (SMS Mode). LoRa: " +
-                      String(loraInitialized ? "ON" : "OFF"), "");
+  userComm.sendNotification("Irrigation Controller v2.0 Started (SMS Mode). LoRa: " +
+                            String(loraInitialized ? "ON" : "OFF"), "");
   #endif
 }
 
@@ -533,14 +478,14 @@ void loop() {
         Serial.println("[Queue] ✓ Schedule loaded");
         // Publish schedule load success (important event - keep this)
         publishStatus("EVT|SCH|LOADED");
-        // Send SMS notification
-        sendSMSNotification("Schedule loaded successfully", "");
+        // Send notification
+        userComm.sendNotification("Schedule loaded successfully", "");
       } else {
         Serial.println("[Queue] ✗ Schedule invalid");
         // Publish schedule load failure (important event - keep this)
         publishStatus("ERR|SCH|INVALID");
-        // Send SMS alert
-        sendSMSNotification("ERROR: Invalid schedule format", "");
+        // Send notification
+        userComm.sendNotification("ERROR: Invalid schedule format", "");
       }
     }
     // Unknown
@@ -583,8 +528,8 @@ void loop() {
           // Publish schedule trigger (important event - keep this)
           publishStatus("EVT|SCH|TRIGGER|S=" + sch.id);
 
-          // Send SMS notification
-          sendSMSNotification("Schedule started: " + sch.id, "");
+          // Send notification
+          userComm.sendNotification("Schedule started: " + sch.id, "");
 
           if (sch.rec == 'O') {
             sch.enabled = false;

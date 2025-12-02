@@ -821,3 +821,97 @@ std::vector<SMSMessage> ModemSMS::processIncomingMessages(const String &adminPho
 
   return commandMessages;
 }
+
+// ========== Notification Functions ==========
+
+// Rate limiting check
+bool ModemSMS::shouldSendAlert(const String &alertKey) {
+  if (alertKey.length() == 0) {
+    return true;  // No rate limiting if no key provided
+  }
+
+  unsigned long now = millis();
+
+  if (lastAlertTime.find(alertKey) == lastAlertTime.end()) {
+    // First time seeing this alert
+    lastAlertTime[alertKey] = now;
+    return true;
+  }
+
+  unsigned long timeSinceLastAlert = now - lastAlertTime[alertKey];
+
+  if (timeSinceLastAlert >= SMS_ALERT_RATE_LIMIT_MS) {
+    lastAlertTime[alertKey] = now;
+    return true;
+  }
+
+  Serial.println("[SMS] Alert rate-limited: " + alertKey + " (sent " +
+                 String(timeSinceLastAlert/1000) + "s ago)");
+  return false;
+}
+
+// Send SMS notification with rate limiting (uses Config.h phone numbers)
+bool ModemSMS::sendNotification(const String &message, const String &alertKey) {
+  #if ENABLE_SMS_ALERTS
+  if (!isReady()) {
+    Serial.println("[SMS] ⚠ Modem not ready, cannot send notification");
+    return false;
+  }
+
+  // Check rate limiting if alert key provided
+  if (!shouldSendAlert(alertKey)) {
+    return false;  // Skip sending - rate limited
+  }
+
+  bool sentToAny = false;
+
+  // Send to configured phone numbers (defined in Config.h)
+  #ifdef SMS_ALERT_PHONE_1
+  if (String(SMS_ALERT_PHONE_1).length() > 0) {
+    if (sendSMS(SMS_ALERT_PHONE_1, message)) {
+      Serial.println("[SMS] ✓ Notification sent to: " + String(SMS_ALERT_PHONE_1));
+      sentToAny = true;
+    }
+  }
+  #endif
+
+  #ifdef SMS_ALERT_PHONE_2
+  if (String(SMS_ALERT_PHONE_2).length() > 0) {
+    if (sendSMS(SMS_ALERT_PHONE_2, message)) {
+      Serial.println("[SMS] ✓ Notification sent to: " + String(SMS_ALERT_PHONE_2));
+      sentToAny = true;
+    }
+  }
+  #endif
+
+  return sentToAny;
+  #else
+  return false;  // SMS alerts disabled
+  #endif
+}
+
+// Send SMS notification to specific phone numbers
+bool ModemSMS::sendNotificationToPhones(const String &message, const std::vector<String> &phoneNumbers, const String &alertKey) {
+  if (!isReady()) {
+    Serial.println("[SMS] ⚠ Modem not ready, cannot send notification");
+    return false;
+  }
+
+  // Check rate limiting if alert key provided
+  if (!shouldSendAlert(alertKey)) {
+    return false;  // Skip sending - rate limited
+  }
+
+  bool sentToAny = false;
+
+  for (const String &phone : phoneNumbers) {
+    if (phone.length() > 0) {
+      if (sendSMS(phone, message)) {
+        Serial.println("[SMS] ✓ Notification sent to: " + phone);
+        sentToAny = true;
+      }
+    }
+  }
+
+  return sentToAny;
+}
