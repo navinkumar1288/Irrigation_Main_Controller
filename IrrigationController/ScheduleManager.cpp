@@ -248,9 +248,6 @@ void ScheduleManager::startIfDue() {
 
     // Notify about schedule failure
     publishStatus("ERR|SCH|START_FAIL|S=" + currentScheduleId + "|NO_NODES");
-    sendSMSNotification("ERROR: Schedule '" + currentScheduleId +
-                        "' failed to start - no nodes responded",
-                        "SCH_START_FAIL");
 
     // Clear the loaded schedule
     scheduleLoaded = false;
