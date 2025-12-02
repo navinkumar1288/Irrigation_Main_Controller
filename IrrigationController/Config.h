@@ -12,8 +12,18 @@
 #define ENABLE_MODEM 1
 #define ENABLE_MQTT 0          // Set to 0 to use SMS instead (SMS MODE ACTIVE)
 #define ENABLE_BLE 1
+#define ENABLE_HTTP 1          // HTTP REST API
 #define ENABLE_DISPLAY 1
 #define ENABLE_RTC 1
+
+// ========== Communication Channel Commands ==========
+// Enable/disable command processing for each channel
+#define ENABLE_BLE_COMMANDS 1
+#define ENABLE_LORA_COMMANDS 1
+#define ENABLE_HTTP_COMMANDS 1
+
+// ========== HTTP API Settings ==========
+#define HTTP_SERVER_PORT 80
 
 // ========== Conditional Communication Logic ==========
 // If MQTT is enabled, disable SMS (MQTT takes priority)

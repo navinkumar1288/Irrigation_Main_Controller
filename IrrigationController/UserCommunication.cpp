@@ -1,19 +1,20 @@
-// UserCommunication.cpp - Handles all user communication (SMS, BLE, LoRa, MQTT, Serial)
+// UserCommunication.cpp - Handles all user communication (SMS, BLE, LoRa, MQTT, HTTP, Serial)
 #include "UserCommunication.h"
 #include "MessageQueue.h"
 
 extern MessageQueue incomingQueue;
 extern bool loraInitialized;
 
-UserCommunication::UserCommunication() : smsComm(nullptr), bleComm(nullptr), loraComm(nullptr), mqttComm(nullptr), nodeCommandCallback(nullptr) {}
+UserCommunication::UserCommunication() : smsComm(nullptr), bleComm(nullptr), loraComm(nullptr), mqttComm(nullptr), httpComm(nullptr), nodeCommandCallback(nullptr) {}
 
-void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, const String &adminPhoneNum) {
+void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, HTTPComm* http, const String &adminPhoneNum) {
   smsComm = sms;
   bleComm = ble;
   loraComm = lora;
   mqttComm = mqtt;
+  httpComm = http;
   adminPhone = adminPhoneNum;
-  Serial.println("[UserComm] ✓ Initialized with all channels (SMS, BLE, LoRa, MQTT)");
+  Serial.println("[UserComm] ✓ Initialized with all channels (SMS, BLE, LoRa, MQTT, HTTP)");
 }
 
 void UserCommunication::setNodeCommandCallback(NodeCommandCallback callback) {
@@ -214,12 +215,16 @@ void UserCommunication::processAllChannels(std::vector<Schedule>* schedules, boo
   processSMSCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
   #endif
 
-  #if ENABLE_LORA
+  #if ENABLE_LORA_COMMANDS
   processLoRaCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
   #endif
 
   #if ENABLE_MQTT
   processMQTTCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+  #endif
+
+  #if ENABLE_HTTP_COMMANDS
+  processHTTPCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
   #endif
 }
 
@@ -313,6 +318,46 @@ void UserCommunication::processMQTTCommands(std::vector<Schedule>* schedules, bo
   // Check if there are any MQTT commands (implementation would depend on how MQTT queues messages)
   // For now, this is a placeholder as MQTT typically uses callbacks
   // The actual implementation would process messages from an MQTT command queue
+  #endif
+}
+
+// ========== Process HTTP Commands ==========
+
+void UserCommunication::processHTTPCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  #if ENABLE_HTTP_COMMANDS
+  if (httpComm == nullptr || !httpComm->isReady()) {
+    return;
+  }
+
+  // Check if there are any HTTP commands
+  if (!httpComm->hasCommands()) {
+    return;
+  }
+
+  // Get all pending commands
+  std::vector<HTTPCommand> commands = httpComm->getCommands();
+
+  // Process each command
+  for (const HTTPCommand &cmd : commands) {
+    Serial.println("\n[UserComm:HTTP] ==================");
+    Serial.println("[UserComm:HTTP] From: " + cmd.source);
+    Serial.println("[UserComm:HTTP] Command: " + cmd.command);
+
+    // Route command through unified handler
+    CommandResult result = routeCommand(cmd.command, schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+
+    // Log result (HTTP response already sent in HTTPComm::handleCommand)
+    if (result.success) {
+      Serial.println("[UserComm:HTTP] ✓ Success: " + result.response);
+    } else {
+      Serial.println("[UserComm:HTTP] ✗ Failed: " + result.response);
+    }
+
+    Serial.println("[UserComm:HTTP] ==================\n");
+  }
+
+  // Clear processed commands
+  httpComm->clearCommands();
   #endif
 }
 
@@ -603,6 +648,13 @@ void UserCommunication::processBackground() {
         smsComm->scanForNewMessages();
       }
     }
+  }
+  #endif
+
+  // Process HTTP background (handles incoming requests)
+  #if ENABLE_HTTP
+  if (httpComm != nullptr && httpComm->isReady()) {
+    httpComm->processBackground();
   }
   #endif
 }

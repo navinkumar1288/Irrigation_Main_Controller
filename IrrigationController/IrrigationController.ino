@@ -10,6 +10,7 @@
 #include "ModemMQTT.h"        // MQTT module
 #include "ModemSMS.h"         // SMS module
 #include "BLEComm.h"
+#include "HTTPComm.h"         // HTTP API module
 #include "ScheduleManager.h"
 #include "NodeCommunication.h"  // NEW: Node communication module
 #include "UserCommunication.h"  // NEW: User communication module
@@ -41,6 +42,7 @@ LoRaComm loraComm;
 ModemMQTT mqtt;               // MQTT instance
 ModemSMS sms;                 // SMS instance
 BLEComm bleComm;
+HTTPComm httpComm;            // HTTP API instance
 ScheduleManager scheduleMgr;
 NodeCommunication nodeComm;   // NEW: Node communication module
 UserCommunication userComm;   // NEW: User communication module
@@ -171,7 +173,7 @@ void setup() {
   #endif
   
   // Initialize BLE
-  Serial.println("[8/9] BLE...");
+  Serial.println("[8/10] BLE...");
   #if ENABLE_BLE
   if (bleComm.init()) {
     bleComm.setCommandCallback(handleBLECommand);
@@ -179,12 +181,22 @@ void setup() {
   }
   #endif
 
-  // Initialize UserCommunication module (depends on SMS, BLE, LoRa, MQTT)
+  // Initialize HTTP API
+  Serial.println("[9/10] HTTP API...");
+  #if ENABLE_HTTP
+  if (httpComm.init(HTTP_SERVER_PORT)) {
+    Serial.println("      ✓ HTTP API started on port " + String(HTTP_SERVER_PORT));
+  } else {
+    Serial.println("      ❌ HTTP API failed");
+  }
+  #endif
+
+  // Initialize UserCommunication module (depends on SMS, BLE, LoRa, MQTT, HTTP)
   String adminPhone = "";
   #ifdef SMS_ALERT_PHONE_1
   adminPhone = String(SMS_ALERT_PHONE_1);
   #endif
-  userComm.init(&sms, &bleComm, &loraComm, &mqtt, adminPhone);
+  userComm.init(&sms, &bleComm, &loraComm, &mqtt, &httpComm, adminPhone);
   Serial.println("      ✓ UserComm initialized");
 
   // Set up UserCommunication callback for node commands (business logic)
@@ -236,7 +248,7 @@ void setup() {
   });
 
   // Initialize Scheduler
-  Serial.println("[9/9] Scheduler...");
+  Serial.println("[10/10] Scheduler...");
   Serial.println("      ✓ Scheduler ready");
   Serial.printf("      ✓ %d schedules loaded\n", schedules.size());
 

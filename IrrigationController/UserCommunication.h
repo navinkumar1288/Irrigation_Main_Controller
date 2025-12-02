@@ -1,4 +1,4 @@
-// UserCommunication.h - Handles all user communication (SMS, BLE, LoRa, MQTT, Serial)
+// UserCommunication.h - Handles all user communication (SMS, BLE, LoRa, MQTT, HTTP, Serial)
 #ifndef USER_COMMUNICATION_H
 #define USER_COMMUNICATION_H
 
@@ -10,6 +10,7 @@
 #include "BLEComm.h"
 #include "LoRaComm.h"
 #include "ModemMQTT.h"
+#include "HTTPComm.h"
 
 // Forward declarations
 class ScheduleManager;
@@ -32,6 +33,7 @@ private:
   BLEComm* bleComm;
   LoRaComm* loraComm;
   ModemMQTT* mqttComm;
+  HTTPComm* httpComm;
   NodeCommandCallback nodeCommandCallback;
   String adminPhone;
 
@@ -54,7 +56,7 @@ public:
   UserCommunication();
 
   // Initialize with module pointers (NO NodeCommunication - uses callback instead)
-  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, const String &adminPhoneNum);
+  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, HTTPComm* http, const String &adminPhoneNum);
 
   // Set callback for node commands (business logic in .ino file)
   void setNodeCommandCallback(NodeCommandCallback callback);
@@ -66,6 +68,7 @@ public:
   void processSMSCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
   void processLoRaCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
   void processMQTTCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void processHTTPCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
   void processBLECommand(int nodeId, const String &command);
   void processSerialCommand(const String &input, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded);
 
