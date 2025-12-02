@@ -28,7 +28,7 @@ CommandResult UserCommunication::handleStatusCommand() {
   result.success = true;
   result.commandType = "STATUS";
   result.response = "System OK. ";
-  result.response += "MQTT: " + String(mqtt.isConnected() ? "ON" : "OFF") + ", ";
+  result.response += "MQTT: " + String((mqttComm && mqttComm->isConnected()) ? "ON" : "OFF") + ", ";
   result.response += "LoRa: " + String(loraInitialized ? "ON" : "OFF");
   return result;
 }
