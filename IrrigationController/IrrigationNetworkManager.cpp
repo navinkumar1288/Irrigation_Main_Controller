@@ -1,9 +1,10 @@
-// NetworkManager.cpp - Unified network connection manager with automatic fallback
-#include "NetworkManager.h"
+// IrrigationNetworkManager.cpp - Unified network connection manager with automatic fallback
+// Renamed to avoid conflict with ESP32's NetworkManager class
+#include "IrrigationNetworkManager.h"
 #include "PPPoSManager.h"
 #include "WiFiComm.h"
 
-NetworkManager::NetworkManager()
+IrrigationNetworkManager::IrrigationNetworkManager()
   : ppposManager(nullptr),
     wifiComm(nullptr),
     modemSerial(nullptr),
@@ -14,7 +15,7 @@ NetworkManager::NetworkManager()
     reconnectInterval(60000) {  // Default 60 second reconnect interval
 }
 
-void NetworkManager::init(PPPoSManager* pppos, WiFiComm* wifi, HardwareSerial* serial) {
+void IrrigationNetworkManager::init(PPPoSManager* pppos, WiFiComm* wifi, HardwareSerial* serial) {
   Serial.println("[NetMgr] Initializing Network Manager...");
 
   ppposManager = pppos;
@@ -25,7 +26,7 @@ void NetworkManager::init(PPPoSManager* pppos, WiFiComm* wifi, HardwareSerial* s
   Serial.println("[NetMgr] Fallback order: PPPoS → WiFi");
 }
 
-bool NetworkManager::connect(uint32_t pppos_timeout_ms, uint32_t wifi_timeout_ms) {
+bool IrrigationNetworkManager::connect(uint32_t pppos_timeout_ms, uint32_t wifi_timeout_ms) {
   Serial.println("[NetMgr] ========================================");
   Serial.println("[NetMgr] Starting network connection...");
   Serial.println("[NetMgr] ========================================");
@@ -96,7 +97,7 @@ bool NetworkManager::connect(uint32_t pppos_timeout_ms, uint32_t wifi_timeout_ms
   return false;
 }
 
-bool NetworkManager::tryPPPoS(uint32_t timeout_ms) {
+bool IrrigationNetworkManager::tryPPPoS(uint32_t timeout_ms) {
 #if ENABLE_PPPOS
   if (ppposManager == nullptr || modemSerial == nullptr) {
     Serial.println("[NetMgr] ❌ PPPoS manager not initialized");
@@ -129,7 +130,7 @@ bool NetworkManager::tryPPPoS(uint32_t timeout_ms) {
 #endif
 }
 
-bool NetworkManager::tryWiFi(uint32_t timeout_ms) {
+bool IrrigationNetworkManager::tryWiFi(uint32_t timeout_ms) {
 #if ENABLE_WIFI
   if (wifiComm == nullptr) {
     Serial.println("[NetMgr] ❌ WiFi manager not initialized");
@@ -162,7 +163,7 @@ bool NetworkManager::tryWiFi(uint32_t timeout_ms) {
 #endif
 }
 
-bool NetworkManager::isConnected() {
+bool IrrigationNetworkManager::isConnected() {
   // Check active connection status
   switch (activeConnection) {
     case ConnectionType::PPPOS:
@@ -203,19 +204,19 @@ bool NetworkManager::isConnected() {
   }
 }
 
-ConnectionType NetworkManager::getConnectionType() {
+ConnectionType IrrigationNetworkManager::getConnectionType() {
   return activeConnection;
 }
 
-String NetworkManager::getLocalIP() {
+String IrrigationNetworkManager::getLocalIP() {
   return localIP;
 }
 
-NetworkState NetworkManager::getState() {
+NetworkState IrrigationNetworkManager::getState() {
   return state;
 }
 
-void NetworkManager::processBackground() {
+void IrrigationNetworkManager::processBackground() {
   // If disconnected and enough time has passed, attempt reconnection
   if (!isConnected() && state == NetworkState::DISCONNECTED) {
     if (millis() - lastConnectionAttempt >= reconnectInterval) {
@@ -232,7 +233,7 @@ void NetworkManager::processBackground() {
 #endif
 }
 
-bool NetworkManager::disconnect() {
+bool IrrigationNetworkManager::disconnect() {
   Serial.println("[NetMgr] Disconnecting network...");
 
   bool success = false;
@@ -269,7 +270,7 @@ bool NetworkManager::disconnect() {
   return success;
 }
 
-void NetworkManager::setReconnectInterval(unsigned long interval_ms) {
+void IrrigationNetworkManager::setReconnectInterval(unsigned long interval_ms) {
   reconnectInterval = interval_ms;
   Serial.println("[NetMgr] Reconnect interval set to " + String(interval_ms / 1000) + " seconds");
 }

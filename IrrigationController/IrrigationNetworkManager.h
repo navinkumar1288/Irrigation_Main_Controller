@@ -1,6 +1,7 @@
-// NetworkManager.h - Unified network connection manager with automatic fallback
-#ifndef NETWORK_MANAGER_H
-#define NETWORK_MANAGER_H
+// IrrigationNetworkManager.h - Unified network connection manager with automatic fallback
+// Renamed to avoid conflict with ESP32's NetworkManager class
+#ifndef IRRIGATION_NETWORK_MANAGER_H
+#define IRRIGATION_NETWORK_MANAGER_H
 
 #include <Arduino.h>
 #include "Config.h"
@@ -22,7 +23,7 @@ enum class NetworkState {
   CONNECTED
 };
 
-class NetworkManager {
+class IrrigationNetworkManager {
 private:
   PPPoSManager* ppposManager;
   WiFiComm* wifiComm;
@@ -39,7 +40,7 @@ private:
   bool tryWiFi(uint32_t timeout_ms);
 
 public:
-  NetworkManager();
+  IrrigationNetworkManager();
 
   // Initialize with PPPoS and WiFi managers
   void init(PPPoSManager* pppos, WiFiComm* wifi, HardwareSerial* serial);

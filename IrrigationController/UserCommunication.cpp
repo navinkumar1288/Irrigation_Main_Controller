@@ -473,31 +473,50 @@ void UserCommunication::processSerialCommand(const String &input, std::vector<Sc
 // NOTE: Use publishStatus() for all notifications and status updates
 // This method handles compact message formatting for SMS/cellular data efficiency
 
-// Publish status to all available channels (MQTT/SMS/BLE)
+// Publish status to all available channels (MQTT + SMS + BLE)
+// Sends compact messages to all enabled channels to maximize reliability
 void UserCommunication::publishStatus(const String &msg) {
   Serial.println("[Status] " + msg);
 
+  bool sentToAny = false;
+
+  // Send to MQTT if available
   #if ENABLE_MQTT
-  // MQTT enabled - publish to MQTT
   if (mqttComm != nullptr && mqttComm->isConnected()) {
-    mqttComm->publish(MQTT_TOPIC_STATUS, msg);
-    Serial.println("[Status] → Published to MQTT");
-  }
-  #elif ENABLE_SMS
-  // MQTT disabled, SMS enabled - send important status via SMS
-  // Only send critical events to avoid SMS flooding
-  if (msg.indexOf("EVT|") >= 0 || msg.indexOf("BOOT") >= 0 ||
-      msg.indexOf("ERROR") >= 0 || msg.indexOf("FAIL") >= 0) {
-    sendNotification("Status: " + msg, "");
-    Serial.println("[Status] → Sent via SMS (MQTT disabled)");
+    if (mqttComm->publish(MQTT_TOPIC_STATUS, msg)) {
+      Serial.println("[Status] → Published to MQTT");
+      sentToAny = true;
+    }
   }
   #endif
 
+  // Send to SMS if available (only critical events to save SMS quota)
+  // Critical events: ERR, WRN, BOOT, FAIL messages
+  #if ENABLE_SMS
+  if (smsComm != nullptr && smsComm->isReady()) {
+    // Only send errors, warnings, boot, and failures via SMS to conserve 100 SMS/day limit
+    if (msg.indexOf("ERR|") >= 0 || msg.indexOf("WRN|") >= 0 ||
+        msg.indexOf("BOOT") >= 0 || msg.indexOf("FAIL") >= 0) {
+      if (smsComm->sendNotification(msg, "STATUS_" + msg.substring(0, 10))) {
+        Serial.println("[Status] → Sent via SMS (critical event)");
+        sentToAny = true;
+      }
+    }
+  }
+  #endif
+
+  // Send to BLE if connected (always send - no data cost)
   #if ENABLE_BLE
   if (bleComm != nullptr && bleComm->isConnected()) {
     bleComm->notify("STAT|" + msg);
+    Serial.println("[Status] → Sent via BLE");
+    sentToAny = true;
   }
   #endif
+
+  if (!sentToAny) {
+    Serial.println("[Status] ⚠ Not sent (no channels available)");
+  }
 }
 
 // ========== Process Serial Input ==========
