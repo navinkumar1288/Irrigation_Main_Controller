@@ -16,7 +16,7 @@
 #include "NodeCommunication.h"  // NEW: Node communication module
 #include "UserCommunication.h"  // NEW: User communication module
 #include "PPPoSManager.h"       // PPPoS cellular data module
-#include "NetworkManager.h"     // Unified network manager (PPPoS/WiFi fallback)
+#include "IrrigationNetworkManager.h"  // Unified network manager (PPPoS/WiFi fallback)
 #include "MessageFormats.h"     // Compact message formats for SMS/data efficiency
 
 // ========== Global Variable Definitions ==========
@@ -52,7 +52,7 @@ ScheduleManager scheduleMgr;
 NodeCommunication nodeComm;   // NEW: Node communication module
 UserCommunication userComm;   // NEW: User communication module
 PPPoSManager pppos;           // PPPoS cellular data module
-NetworkManager networkMgr;    // Unified network manager (PPPoS/WiFi fallback)
+IrrigationNetworkManager networkMgr;  // Unified network manager (PPPoS/WiFi fallback)
 
 TwoWire WireRTC = TwoWire(1);
 RTC_DS3231 rtc;
@@ -448,11 +448,8 @@ void loop() {
           scheduleLoaded = true;
           currentStepIndex = -1;
 
-          // Publish schedule trigger (important event - keep this)
-          userComm.publishStatus("EVT|SCH|TRIGGER|S=" + sch.id);
-
-          // Send notification
-          userComm.sendNotification("Schedule started: " + sch.id, "");
+          // Publish schedule start - compact format saves SMS/data
+          userComm.publishStatus(MessageFormatter::formatScheduleStart(sch.id));
 
           if (sch.rec == 'O') {
             sch.enabled = false;
