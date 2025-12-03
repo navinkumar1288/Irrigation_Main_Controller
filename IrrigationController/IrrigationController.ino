@@ -120,10 +120,12 @@ void setup() {
     loraInitialized = true;
     Serial.println("      ✓ LoRa OK");
 
-    // Initialize NodeCommunication module (depends on LoRa)
+    // Initialize NodeCommunication module (depends on LoRa and ENABLE_LORA_NODE_COMM)
+    #if ENABLE_LORA_NODE_COMM
     if (nodeComm.init(&loraComm)) {
       Serial.println("      ✓ NodeComm initialized");
     }
+    #endif
   } else {
     Serial.println("      ❌ LoRa FAILED");
   }
@@ -249,7 +251,7 @@ void setup() {
     // ========== Business Logic for User Node Commands ==========
     Serial.printf("[Business] User requested Node %d command: %s\n", nodeId, command.c_str());
 
-    #if ENABLE_LORA
+    #if ENABLE_LORA_NODE_COMM
     if (loraInitialized && nodeComm.isInitialized()) {
       bool result = nodeComm.sendCommand(nodeId, command);
 
@@ -265,10 +267,11 @@ void setup() {
     }
     #endif
 
-    return false;  // LoRa not available
+    return false;  // LoRa node communication not available
   });
 
   // Set up NodeCommunication callback for node messages (business logic)
+  #if ENABLE_LORA_NODE_COMM
   nodeComm.setMessageCallback([](const NodeMessage& msg) {
     // ========== Business Logic for Node Messages ==========
     if (msg.type == NodeMessageType::TELEMETRY) {
@@ -284,6 +287,7 @@ void setup() {
       userComm.publishStatus(MessageFormatter::formatAutoClose(msg.nodeId));
     }
   });
+  #endif
 
   // Initialize Scheduler
   Serial.println("[11/11] Scheduler...");
@@ -355,8 +359,8 @@ void loop() {
   networkMgr.processBackground();  // Feeds PPP stack & handles auto-reconnection
   #endif
 
-  // Process LoRa incoming (via NodeCommunication module - low-level receive)
-  #if ENABLE_LORA
+  // Process LoRa incoming from nodes (via NodeCommunication module)
+  #if ENABLE_LORA_NODE_COMM
   if (loraInitialized) {
     nodeComm.processIncoming();  // Receives LoRa packets and queues them
     nodeComm.processNodeMessages();  // Process node-specific messages (STAT, AUTO_CLOSE)

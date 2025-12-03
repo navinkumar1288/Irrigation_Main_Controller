@@ -8,19 +8,24 @@
 #include <ctime>
 
 // ========== Feature Enables ==========
-#define ENABLE_LORA 1
+#define ENABLE_LORA 1              // LoRa radio hardware initialization
 #define ENABLE_MODEM 1
-#define ENABLE_MQTT 0          // Set to 0 to use SMS instead (SMS MODE ACTIVE)
+#define ENABLE_MQTT 0              // Set to 0 to use SMS instead (SMS MODE ACTIVE)
 #define ENABLE_BLE 1
-#define ENABLE_WIFI 1          // WiFi connectivity
-#define ENABLE_HTTP 1          // HTTP REST API (requires WiFi)
+#define ENABLE_WIFI 1              // WiFi connectivity
+#define ENABLE_HTTP 1              // HTTP REST API (requires WiFi)
 #define ENABLE_DISPLAY 1
 #define ENABLE_RTC 1
+
+// ========== LoRa Feature Flags ==========
+// ENABLE_LORA must be 1 for any LoRa features to work
+// Fine-grained control over LoRa usage:
+#define ENABLE_LORA_USER_COMM 1    // Accept user commands via LoRa (from mobile app/gateway)
+#define ENABLE_LORA_NODE_COMM 1    // Communicate with irrigation nodes via LoRa
 
 // ========== Communication Channel Commands ==========
 // Enable/disable command processing for each channel
 #define ENABLE_BLE_COMMANDS 1
-#define ENABLE_LORA_COMMANDS 1
 #define ENABLE_WIFI_COMMANDS 1
 #define ENABLE_HTTP_COMMANDS 1
 

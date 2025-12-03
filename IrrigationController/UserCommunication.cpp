@@ -216,7 +216,7 @@ void UserCommunication::processAllChannels(std::vector<Schedule>* schedules, boo
   processSMSCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
   #endif
 
-  #if ENABLE_LORA_COMMANDS
+  #if ENABLE_LORA_USER_COMM
   processLoRaCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
   #endif
 
@@ -270,7 +270,7 @@ void UserCommunication::processSMSCommands(std::vector<Schedule>* schedules, boo
 // ========== Process LoRa Commands ==========
 
 void UserCommunication::processLoRaCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
-  #if ENABLE_LORA
+  #if ENABLE_LORA_USER_COMM
   if (loraComm == nullptr || !loraInitialized) {
     return;
   }
