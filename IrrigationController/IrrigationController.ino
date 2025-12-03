@@ -17,6 +17,7 @@
 #include "UserCommunication.h"  // NEW: User communication module
 #include "PPPoSManager.h"       // PPPoS cellular data module
 #include "NetworkManager.h"     // Unified network manager (PPPoS/WiFi fallback)
+#include "MessageFormats.h"     // Compact message formats for SMS/data efficiency
 
 // ========== Global Variable Definitions ==========
 SystemConfig sysConfig;
@@ -254,14 +255,10 @@ void setup() {
 
       if (result) {
         // Publish command success (business logic)
-        userComm.publishStatus("EVT|CMD|N=" + String(nodeId) + "|C=" + command + "|OK");
+        userComm.publishStatus(MessageFormatter::formatCommandSuccess(nodeId, command));
       } else {
-        // Publish command failure (business logic)
-        userComm.publishStatus("ERR|CMD|N=" + String(nodeId) + "|C=" + command + "|FAIL");
-
-        // Send notification for failed commands (business logic with rate limiting)
-        userComm.sendNotification("ALERT: LoRa command failed. Node: " + String(nodeId) + ", Cmd: " + command,
-                                   "LORA_FAIL_N" + String(nodeId));
+        // Publish command failure (business logic) - compact format saves SMS/data
+        userComm.publishStatus(MessageFormatter::formatCommandFail(nodeId, command));
       }
 
       return result;
@@ -278,16 +275,13 @@ void setup() {
       Serial.printf("[Business] Node %d Telemetry: BATT=%d%%, BV=%.2fV, SOLV=%.2fV\n",
                     msg.nodeId, msg.batteryPercent, msg.batteryVoltage, msg.solarVoltage);
 
-      // Low battery alert (business logic)
+      // Low battery alert (business logic) - compact format saves SMS/data
       if (msg.batteryPercent < 20) {
-        userComm.publishStatus("WARN|LOW_BATT|N=" + String(msg.nodeId) + "|BATT=" + String(msg.batteryPercent));
-        userComm.sendNotification("WARN: Low battery on Node " + String(msg.nodeId) +
-                                   " - " + String(msg.batteryPercent) + "%",
-                                   "LOW_BATT_N" + String(msg.nodeId));
+        userComm.publishStatus(MessageFormatter::formatLowBattery(msg.nodeId, msg.batteryPercent));
       }
     } else if (msg.type == NodeMessageType::AUTO_CLOSE) {
       Serial.printf("[Business] Node %d Auto-Close: %s\n", msg.nodeId, msg.reason.c_str());
-      userComm.publishStatus("EVT|AUTO_CLOSE|N=" + String(msg.nodeId));
+      userComm.publishStatus(MessageFormatter::formatAutoClose(msg.nodeId));
     }
   });
 
@@ -335,17 +329,20 @@ void setup() {
   Serial.println("  HELP - Show commands");
   Serial.println();
 
-  // Publish boot event (important event - keep this)
-  userComm.publishStatus("EVT|BOOT|OK|V2.0");
-
-  // Send boot notification via enabled communication method
+  // Send boot notification via enabled communication method - compact format saves SMS/data
   #if ENABLE_MQTT
-  // MQTT mode - boot notification already sent via userComm.publishStatus
-  #elif ENABLE_SMS
-  // SMS mode - send boot notification
-  userComm.sendNotification("Irrigation Controller v2.0 Started (SMS Mode). LoRa: " +
-                            String(loraInitialized ? "ON" : "OFF"), "");
+  bool mqttOk = mqtt.isConnected();
+  #else
+  bool mqttOk = false;
   #endif
+
+  #if ENABLE_PPPOS || ENABLE_WIFI
+  bool netOk = networkMgr.isConnected();
+  #else
+  bool netOk = false;
+  #endif
+
+  userComm.publishStatus(MessageFormatter::formatBoot(loraInitialized, mqttOk, netOk));
 }
 
 // ========== Main Loop ==========
@@ -406,16 +403,12 @@ void loop() {
       Serial.println("[Queue] Schedule message");
       if (scheduleMgr.validateAndLoad(msg)) {
         Serial.println("[Queue] ✓ Schedule loaded");
-        // Publish schedule load success (important event - keep this)
-        userComm.publishStatus("EVT|SCH|LOADED");
-        // Send notification
-        userComm.sendNotification("Schedule loaded successfully", "");
+        // Publish schedule load success - compact format saves SMS/data
+        userComm.publishStatus(MessageFormatter::formatScheduleLoaded(currentScheduleId));
       } else {
         Serial.println("[Queue] ✗ Schedule invalid");
-        // Publish schedule load failure (important event - keep this)
-        userComm.publishStatus("ERR|SCH|INVALID");
-        // Send notification
-        userComm.sendNotification("ERROR: Invalid schedule format", "");
+        // Publish schedule load failure - compact format saves SMS/data
+        userComm.publishStatus(MessageFormatter::formatScheduleInvalid());
       }
     }
     // Unknown

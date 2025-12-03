@@ -50,9 +50,6 @@ public:
 
   // Send response (for command results)
   void sendResponse(const String &message);
-
-  // Send notification via HTTP (webhook/callback if configured)
-  bool sendNotification(const String &message);
 };
 
 extern HTTPComm httpComm;
