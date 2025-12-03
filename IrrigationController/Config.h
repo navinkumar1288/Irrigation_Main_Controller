@@ -126,14 +126,14 @@
 #define NTP_TIMEZONE_OFFSET 0
 
 // ========== MQTT Settings ==========
-// EMQX Cloud Broker - TLS/SSL enabled
+// EMQX Cloud Broker - MQTT v5 over TLS/SSL
 #define MQTT_BROKER "sdbc1da0.ala.asia-southeast1.emqxsl.com"
 #define MQTT_PORT 8883                // MQTT over TLS/SSL port
 #define MQTT_USE_SSL 1                // Enable TLS/SSL encryption
 #define MQTT_CLIENT_ID "irrigation_controller_001"
 #define MQTT_USER "navin"
 #define MQTT_PASS "HaiNavin33"
-// Note: PubSubClient library supports MQTT v3.1.1 only (not v5)
+// Using ESP-IDF MQTT client with MQTT v5 protocol support
 
 #define MQTT_TOPIC_STATUS "irrigation/status"
 #define MQTT_TOPIC_COMMANDS "irrigation/commands"

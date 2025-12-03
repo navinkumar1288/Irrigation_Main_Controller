@@ -1,227 +1,249 @@
-// MQTTComm.cpp - MQTT communication using ESP32 native networking
+// MQTTComm.cpp - MQTT v5 communication using ESP-IDF native MQTT client
 #include "MQTTComm.h"
 
-// Static callback wrapper for PubSubClient
+// Static instance pointer for event handler
 static MQTTComm *mqttInstance = nullptr;
 
-static void mqttCallbackWrapper(char *topic, byte *payload, unsigned int length) {
-  if (mqttInstance && mqttInstance->getClient().connected()) {
-    String topicStr = String(topic);
-    String payloadStr = "";
-    payloadStr.reserve(length + 1);
+// CA Certificate for EMQX Cloud (optional - can use skip_cert_verify for testing)
+// CA Certificate expires: 2031.11.10
+extern const char emqx_ca_cert_pem_start[] asm("_binary_emqx_ca_cert_pem_start");
+extern const char emqx_ca_cert_pem_end[] asm("_binary_emqx_ca_cert_pem_end");
 
-    for (unsigned int i = 0; i < length; i++) {
-      payloadStr += (char)payload[i];
-    }
-
-    Serial.println("[MQTT] ← " + topicStr + ": " + payloadStr);
-
-    // Call user callback if set
-    // Note: We'll handle this via the message callback in the class
-  }
-}
-
-MQTTComm::MQTTComm() : mqtt(espClient), configured(false), lastReconnectAttempt(0), reconnectInterval(5000), messageCallback(nullptr) {
+MQTTComm::MQTTComm()
+  : mqttClient(nullptr),
+    configured(false),
+    connected(false),
+    lastReconnectAttempt(0),
+    reconnectInterval(5000),
+    messageCallback(nullptr) {
   mqttInstance = this;
 }
 
+MQTTComm::~MQTTComm() {
+  if (mqttClient != nullptr) {
+    esp_mqtt_client_stop(mqttClient);
+    esp_mqtt_client_destroy(mqttClient);
+  }
+}
+
 bool MQTTComm::init() {
-  Serial.println("[MQTT] Initializing MQTT client...");
+  Serial.println("[MQTT] Initializing MQTT v5 client...");
+
+  // Build MQTT broker URI
+  String uri = "mqtts://";  // Use mqtts:// for SSL/TLS
+  uri += MQTT_BROKER;
+  uri += ":";
+  uri += String(MQTT_PORT);
+
+  Serial.println("[MQTT] Broker URI: " + uri);
+
+  // Configure MQTT client
+  esp_mqtt_client_config_t mqtt_cfg = {};
+  mqtt_cfg.broker.address.uri = uri.c_str();
+  mqtt_cfg.credentials.username = MQTT_USER;
+  mqtt_cfg.credentials.authentication.password = MQTT_PASS;
+  mqtt_cfg.credentials.client_id = MQTT_CLIENT_ID;
+  mqtt_cfg.session.protocol_ver = MQTT_PROTOCOL_V_5;  // Enable MQTT v5
+  mqtt_cfg.network.timeout_ms = 10000;
+  mqtt_cfg.session.keepalive = 120;
+  mqtt_cfg.buffer.size = 2048;
+  mqtt_cfg.buffer.out_size = 2048;
 
 #if MQTT_USE_SSL
-  // Configure SSL/TLS settings
+  // TLS/SSL configuration
   Serial.println("[MQTT] → Configuring TLS/SSL...");
 
-  // Option 1: Skip certificate validation (NOT RECOMMENDED for production)
-  // Use this for testing or if you don't have the CA certificate
-  espClient.setInsecure();
+  // Option 1: Skip certificate verification (for testing)
+  mqtt_cfg.broker.verification.skip_cert_common_name_check = true;
+  mqtt_cfg.broker.verification.certificate = NULL;
   Serial.println("[MQTT] ⚠ TLS certificate validation disabled (testing mode)");
 
   // Option 2: Use CA certificate (RECOMMENDED for production)
-  // Uncomment and add your CA certificate below:
-  /*
-  const char* emqx_ca_cert = \
-    "-----BEGIN CERTIFICATE-----\n" \
-    "Your CA certificate content here\n" \
-    "-----END CERTIFICATE-----\n";
-  espClient.setCACert(emqx_ca_cert);
-  Serial.println("[MQTT] ✓ TLS CA certificate loaded");
-  */
+  // Uncomment the line below and comment out skip_cert_common_name_check = true
+  // mqtt_cfg.broker.verification.certificate = emqx_ca_cert_pem_start;
 
   Serial.println("[MQTT] ✓ TLS/SSL configured");
 #endif
 
-  // Configure MQTT client
-  mqtt.setServer(MQTT_BROKER, MQTT_PORT);
-  mqtt.setCallback(mqttCallbackWrapper);
-  mqtt.setBufferSize(512);  // Increase buffer for larger messages
-  mqtt.setKeepAlive(120);   // 2 minutes keep-alive
+  // Create MQTT client
+  mqttClient = esp_mqtt_client_init(&mqtt_cfg);
 
-  Serial.println("[MQTT] ✓ MQTT client initialized");
+  if (mqttClient == nullptr) {
+    Serial.println("[MQTT] ❌ Failed to create MQTT client");
+    return false;
+  }
+
+  // Register event handler
+  esp_mqtt_client_register_event(mqttClient, MQTT_EVENT_ANY, mqttEventHandler, this);
+
+  Serial.println("[MQTT] ✓ MQTT v5 client initialized");
   Serial.println("[MQTT] Broker: " + String(MQTT_BROKER) + ":" + String(MQTT_PORT));
-#if MQTT_USE_SSL
-  Serial.println("[MQTT] Protocol: MQTT over TLS/SSL (port 8883)");
-#else
-  Serial.println("[MQTT] Protocol: MQTT (port 1883)");
-#endif
+  Serial.println("[MQTT] Protocol: MQTT v5 over TLS/SSL");
+  Serial.println("[MQTT] Client ID: " + String(MQTT_CLIENT_ID));
 
   return true;
 }
 
 bool MQTTComm::configure() {
-  Serial.println("[MQTT] Configuring MQTT connection...");
+  Serial.println("[MQTT] Starting MQTT client...");
 
-  // Check if we have network connectivity (PPPoS or WiFi)
-  // WiFiClient will work with either PPPoS or WiFi
-  // No explicit check needed - connection attempt will fail if no network
+  if (mqttClient == nullptr) {
+    Serial.println("[MQTT] ❌ Client not initialized");
+    return false;
+  }
 
-  if (!attemptConnection()) {
-    Serial.println("[MQTT] ❌ Initial connection failed");
+  esp_err_t err = esp_mqtt_client_start(mqttClient);
+
+  if (err != ESP_OK) {
+    Serial.println("[MQTT] ❌ Failed to start client, error: " + String(err));
     return false;
   }
 
   configured = true;
-  Serial.println("[MQTT] ✓ MQTT configured and connected");
+  Serial.println("[MQTT] ✓ MQTT client started (will connect asynchronously)");
 
   return true;
 }
 
-bool MQTTComm::attemptConnection() {
-  Serial.println("[MQTT] Connecting to broker...");
-  Serial.println("[MQTT] Client ID: " + String(MQTT_CLIENT_ID));
+void MQTTComm::mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+  MQTTComm *instance = static_cast<MQTTComm*>(handler_args);
+  esp_mqtt_event_handle_t event = static_cast<esp_mqtt_event_handle_t>(event_data);
 
-  // Attempt connection with credentials
-  bool connected = mqtt.connect(
-    MQTT_CLIENT_ID,
-    MQTT_USER,
-    MQTT_PASS
-  );
+  switch (event_id) {
+    case MQTT_EVENT_CONNECTED:
+      Serial.println("[MQTT] ✓ Connected to broker");
+      Serial.println("[MQTT] Session present: " + String(event->session_present));
+      instance->connected = true;
 
-  if (connected) {
-    Serial.println("[MQTT] ✓ Connected to broker");
-    return true;
-  } else {
-    int state = mqtt.state();
-    Serial.print("[MQTT] ❌ Connection failed, state: ");
+      // Auto-subscribe to commands topic
+      if (instance->mqttClient) {
+        int msg_id = esp_mqtt_client_subscribe(instance->mqttClient, MQTT_TOPIC_COMMANDS, 0);
+        Serial.println("[MQTT] Auto-subscribing to commands topic, msg_id=" + String(msg_id));
+      }
+      break;
 
-    switch (state) {
-      case -4:
-        Serial.println("MQTT_CONNECTION_TIMEOUT");
-        break;
-      case -3:
-        Serial.println("MQTT_CONNECTION_LOST");
-        break;
-      case -2:
-        Serial.println("MQTT_CONNECT_FAILED");
-        break;
-      case -1:
-        Serial.println("MQTT_DISCONNECTED");
-        break;
-      case 1:
-        Serial.println("MQTT_CONNECT_BAD_PROTOCOL");
-        break;
-      case 2:
-        Serial.println("MQTT_CONNECT_BAD_CLIENT_ID");
-        break;
-      case 3:
-        Serial.println("MQTT_CONNECT_UNAVAILABLE");
-        break;
-      case 4:
-        Serial.println("MQTT_CONNECT_BAD_CREDENTIALS");
-        break;
-      case 5:
-        Serial.println("MQTT_CONNECT_UNAUTHORIZED");
-        break;
-      default:
-        Serial.println(String(state));
-        break;
-    }
+    case MQTT_EVENT_DISCONNECTED:
+      Serial.println("[MQTT] ⚠ Disconnected from broker");
+      instance->connected = false;
+      break;
 
-    return false;
+    case MQTT_EVENT_SUBSCRIBED:
+      Serial.println("[MQTT] ✓ Subscribed, msg_id=" + String(event->msg_id));
+      break;
+
+    case MQTT_EVENT_UNSUBSCRIBED:
+      Serial.println("[MQTT] Unsubscribed, msg_id=" + String(event->msg_id));
+      break;
+
+    case MQTT_EVENT_PUBLISHED:
+      Serial.println("[MQTT] ✓ Published, msg_id=" + String(event->msg_id));
+      break;
+
+    case MQTT_EVENT_DATA:
+      {
+        String topic = String(event->topic).substring(0, event->topic_len);
+        String payload = String(event->data).substring(0, event->data_len);
+
+        Serial.println("[MQTT] ← " + topic + ": " + payload);
+
+        // Call user callback if set
+        if (instance->messageCallback) {
+          instance->messageCallback(topic, payload);
+        }
+      }
+      break;
+
+    case MQTT_EVENT_ERROR:
+      Serial.println("[MQTT] ❌ Error occurred");
+      if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+        Serial.println("[MQTT] TCP transport error");
+      } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
+        Serial.println("[MQTT] Connection refused");
+      }
+      break;
+
+    case MQTT_EVENT_BEFORE_CONNECT:
+      Serial.println("[MQTT] → Connecting to broker...");
+      break;
+
+    default:
+      Serial.println("[MQTT] Event: " + String(event_id));
+      break;
   }
 }
 
-bool MQTTComm::publish(const String &topic, const String &payload) {
-  if (!mqtt.connected()) {
+bool MQTTComm::publish(const String &topic, const String &payload, int qos) {
+  if (!connected || mqttClient == nullptr) {
     Serial.println("[MQTT] ❌ Cannot publish - not connected");
     return false;
   }
 
   Serial.println("[MQTT] → " + topic + ": " + payload);
 
-  bool result = mqtt.publish(topic.c_str(), payload.c_str());
+  int msg_id = esp_mqtt_client_publish(
+    mqttClient,
+    topic.c_str(),
+    payload.c_str(),
+    payload.length(),
+    qos,
+    0  // retain
+  );
 
-  if (result) {
-    Serial.println("[MQTT] ✓ Published");
+  if (msg_id >= 0) {
+    Serial.println("[MQTT] ✓ Publish queued, msg_id=" + String(msg_id));
+    return true;
   } else {
     Serial.println("[MQTT] ❌ Publish failed");
+    return false;
   }
-
-  return result;
 }
 
-bool MQTTComm::subscribe(const String &topic) {
-  if (!mqtt.connected()) {
+bool MQTTComm::subscribe(const String &topic, int qos) {
+  if (!connected || mqttClient == nullptr) {
     Serial.println("[MQTT] ❌ Cannot subscribe - not connected");
     return false;
   }
 
   Serial.println("[MQTT] Subscribing to: " + topic);
 
-  bool result = mqtt.subscribe(topic.c_str());
+  int msg_id = esp_mqtt_client_subscribe(mqttClient, topic.c_str(), qos);
 
-  if (result) {
-    Serial.println("[MQTT] ✓ Subscribed");
+  if (msg_id >= 0) {
+    Serial.println("[MQTT] ✓ Subscribe request sent, msg_id=" + String(msg_id));
+    return true;
   } else {
     Serial.println("[MQTT] ❌ Subscribe failed");
+    return false;
   }
-
-  return result;
 }
 
 bool MQTTComm::isConnected() {
-  return mqtt.connected();
+  return connected;
 }
 
 void MQTTComm::reconnect() {
-  // Throttle reconnection attempts
-  if (millis() - lastReconnectAttempt < reconnectInterval) {
-    return;
-  }
-
-  lastReconnectAttempt = millis();
-
-  if (!mqtt.connected()) {
-    Serial.println("[MQTT] Reconnecting...");
-
-    if (attemptConnection()) {
-      Serial.println("[MQTT] ✓ Reconnected successfully");
-
-      // Resubscribe to topics if needed
-      // (Application should call subscribe() after reconnection)
-    } else {
-      Serial.println("[MQTT] ❌ Reconnection failed, will retry in " +
-                     String(reconnectInterval / 1000) + " seconds");
-    }
+  // ESP-IDF MQTT client handles reconnection automatically
+  // This method is kept for API compatibility
+  if (!connected && configured && mqttClient != nullptr) {
+    Serial.println("[MQTT] → Reconnection handled automatically by ESP-IDF MQTT");
   }
 }
 
 void MQTTComm::processBackground() {
-  // Process MQTT loop (handles keep-alive, incoming messages, etc.)
-  if (mqtt.connected()) {
-    mqtt.loop();
-  } else {
-    // Attempt reconnection if configured
-    if (configured) {
-      reconnect();
-    }
-  }
+  // ESP-IDF MQTT client runs in its own task
+  // No processing needed in loop() - events are handled asynchronously
+  // This method is kept for API compatibility
 }
 
 void MQTTComm::setMessageCallback(MQTTMessageCallback callback) {
   messageCallback = callback;
 }
 
-PubSubClient& MQTTComm::getClient() {
-  return mqtt;
+void MQTTComm::disconnect() {
+  if (mqttClient != nullptr) {
+    Serial.println("[MQTT] Disconnecting...");
+    esp_mqtt_client_stop(mqttClient);
+    connected = false;
+    Serial.println("[MQTT] ✓ Disconnected");
+  }
 }

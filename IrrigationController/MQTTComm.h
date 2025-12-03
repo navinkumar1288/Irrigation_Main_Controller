@@ -1,13 +1,11 @@
-// MQTTComm.h - MQTT communication using ESP32 native networking
+// MQTTComm.h - MQTT v5 communication using ESP-IDF native MQTT client
 // Works with both PPPoS (cellular) and WiFi connections
-// Supports TLS/SSL for secure MQTT connections
+// Supports TLS/SSL and MQTT v5 protocol
 #ifndef MQTT_COMM_H
 #define MQTT_COMM_H
 
 #include <Arduino.h>
-#include <WiFiClient.h>
-#include <WiFiClientSecure.h>
-#include <PubSubClient.h>
+#include "mqtt_client.h"  // ESP-IDF MQTT client (supports v5)
 #include "Config.h"
 
 // Callback type for incoming MQTT messages
@@ -15,22 +13,19 @@ typedef void (*MQTTMessageCallback)(const String &topic, const String &payload);
 
 class MQTTComm {
 private:
-#if MQTT_USE_SSL
-  WiFiClientSecure espClient;  // Secure client for TLS/SSL
-#else
-  WiFiClient espClient;         // Standard client for non-SSL
-#endif
-  PubSubClient mqtt;
+  esp_mqtt_client_handle_t mqttClient;
   bool configured;
+  bool connected;
   unsigned long lastReconnectAttempt;
   unsigned long reconnectInterval;
   MQTTMessageCallback messageCallback;
 
-  // Internal reconnection logic
-  bool attemptConnection();
+  // Static event handler (required by ESP-IDF MQTT)
+  static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
 public:
   MQTTComm();
+  ~MQTTComm();
 
   // Initialize MQTT (no network connection needed yet)
   bool init();
@@ -38,11 +33,11 @@ public:
   // Configure MQTT connection (requires active network: PPPoS or WiFi)
   bool configure();
 
-  // Publish message to topic
-  bool publish(const String &topic, const String &payload);
+  // Publish message to topic (QoS 0, 1, or 2)
+  bool publish(const String &topic, const String &payload, int qos = 0);
 
-  // Subscribe to topic
-  bool subscribe(const String &topic);
+  // Subscribe to topic (QoS 0, 1, or 2)
+  bool subscribe(const String &topic, int qos = 0);
 
   // Check if connected to MQTT broker
   bool isConnected();
@@ -50,14 +45,14 @@ public:
   // Attempt reconnection if disconnected
   void reconnect();
 
-  // Process background tasks (must be called in loop)
+  // Process background tasks (not needed for ESP-IDF MQTT - handled by events)
   void processBackground();
 
   // Set callback for incoming messages
   void setMessageCallback(MQTTMessageCallback callback);
 
-  // Get underlying PubSubClient for advanced usage
-  PubSubClient& getClient();
+  // Disconnect from broker
+  void disconnect();
 };
 
 #endif
