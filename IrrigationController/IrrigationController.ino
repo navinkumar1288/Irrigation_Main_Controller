@@ -73,8 +73,8 @@ void setup() {
   Serial.println("\n\n");
   Serial.println("========================================");
   Serial.println("  Irrigation Controller v2.0");
-  Serial.println("  Event-Driven Status (No Heartbeat)");
-  Serial.println("  MQTT + SMS Modules (Refactored)");
+  Serial.println("  Event-Driven Architecture");
+  Serial.println("  MQTT + SMS + WiFi + Network Manager");
   Serial.println("========================================\n");
   
   // Initialize storage
@@ -198,7 +198,7 @@ void setup() {
   #if ENABLE_HTTP
   #if ENABLE_WIFI
   // HTTP API only works with WiFi (needs local network, not cellular)
-  if (networkAvailable && networkMgr.getConnectionType() == ConnectionType::WIFI) {
+  if (networkMgr.isConnected() && networkMgr.getConnectionType() == ConnectionType::WIFI) {
     if (httpComm.init(HTTP_SERVER_PORT)) {
       Serial.println("      ✓ HTTP API started on port " + String(HTTP_SERVER_PORT));
       Serial.println("      ✓ Access at: http://" + networkMgr.getLocalIP() + ":" + String(HTTP_SERVER_PORT));
@@ -216,7 +216,7 @@ void setup() {
   // Initialize MQTT (if enabled and network available)
   Serial.println("[10.5/11] MQTT...");
   #if ENABLE_MQTT
-  if (networkAvailable && networkMgr.isConnected()) {
+  if (networkMgr.isConnected()) {
     Serial.print("      → MQTT over ");
     Serial.println(networkMgr.getConnectionType() == ConnectionType::PPPOS ? "PPPoS..." : "WiFi...");
 
@@ -348,27 +348,12 @@ void setup() {
 // ========== Main Loop ==========
 unsigned long lastSchedulerCheck = 0;
 unsigned long lastSMSCheck = 0;
-unsigned long lastHeartbeat = 0;  // For debug heartbeat
 
 void loop() {
   // Process network connectivity (CRITICAL for PPPoS and auto-reconnection)
   #if ENABLE_PPPOS || ENABLE_WIFI
   networkMgr.processBackground();  // Feeds PPP stack & handles auto-reconnection
   #endif
-
-  // Debug heartbeat - print every 30 seconds to confirm loop is running
-  if (millis() - lastHeartbeat > 30000) {
-    lastHeartbeat = millis();
-    Serial.println("[Loop] ❤ Heartbeat - Loop running");
-    #if ENABLE_SMS
-    Serial.println("[Loop] SMS Status: Ready=" + String(sms.isReady() ? "YES" : "NO") +
-                   ", Queued=" + String(sms.getUnreadCount()));
-    #endif
-    #if ENABLE_PPPOS
-    Serial.println("[Loop] PPPoS Status: Connected=" + String(pppos.isConnected() ? "YES" : "NO") +
-                   ", IP=" + pppos.getLocalIP());
-    #endif
-  }
 
   // Process LoRa incoming (via NodeCommunication module - low-level receive)
   #if ENABLE_LORA
