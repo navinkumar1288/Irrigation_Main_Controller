@@ -67,9 +67,6 @@ public:
   std::vector<WiFiCommand> getCommands();
   void clearCommands();
   void queueCommand(const String &command, const String &source);
-
-  // Send notification (placeholder for future WiFi-based notifications)
-  bool sendNotification(const String &message);
 };
 
 #endif // WIFI_COMM_H

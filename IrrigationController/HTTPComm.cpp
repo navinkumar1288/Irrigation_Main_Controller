@@ -66,13 +66,6 @@ void HTTPComm::sendResponse(const String &message) {
   // This is a placeholder for future enhancement
 }
 
-bool HTTPComm::sendNotification(const String &message) {
-  // TODO: Implement webhook/callback notification if configured
-  // For now, just log it
-  Serial.println("[HTTP] Notification (no webhook configured): " + message);
-  return false;
-}
-
 // ========== HTTP Endpoint Handlers ==========
 
 void HTTPComm::handleRoot() {

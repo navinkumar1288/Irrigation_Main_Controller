@@ -168,13 +168,3 @@ void WiFiComm::queueCommand(const String &command, const String &source) {
   pendingCommands.push_back(cmd);
   Serial.println("[WiFi] Command queued: " + command + " (from: " + source + ")");
 }
-
-bool WiFiComm::sendNotification(const String &message) {
-  // Placeholder for future WiFi-based notifications
-  // Could be used for mDNS announcements, UDP broadcasts, etc.
-  if (isConnected()) {
-    Serial.println("[WiFi] Notification: " + message);
-    return true;
-  }
-  return false;
-}

@@ -469,68 +469,9 @@ void UserCommunication::processSerialCommand(const String &input, std::vector<Sc
   Serial.println("[UserComm:Serial] ==================\n");
 }
 
-// ========== Send Notifications ==========
-
-// Unified notification - sends to all enabled channels based on config
-void UserCommunication::sendNotification(const String &message, const String &alertKey) {
-  Serial.println("[UserComm] 📢 Notification: " + message);
-
-  bool sentToAny = false;
-
-  // Send to SMS (if enabled and configured)
-  #if ENABLE_SMS_ALERTS
-  if (smsComm != nullptr && smsComm->isReady()) {
-    if (smsComm->sendNotification(message, alertKey)) {
-      Serial.println("[UserComm] ✓ Sent via SMS");
-      sentToAny = true;
-    }
-  }
-  #endif
-
-  // Send to MQTT (if enabled and connected)
-  #if ENABLE_MQTT
-  if (mqttComm != nullptr && mqttComm->isConnected()) {
-    String topic = String(MQTT_TOPIC_STATUS) + "/notification";
-    if (mqttComm->publish(topic, message)) {
-      Serial.println("[UserComm] ✓ Sent via MQTT");
-      sentToAny = true;
-    }
-  }
-  #endif
-
-  // Send to BLE (if enabled and connected)
-  #if ENABLE_BLE
-  if (bleComm != nullptr && bleComm->isConnected()) {
-    bleComm->notify("NOTIF|" + message);
-    Serial.println("[UserComm] ✓ Sent via BLE");
-    sentToAny = true;
-  }
-  #endif
-
-  if (!sentToAny) {
-    Serial.println("[UserComm] ⚠ Notification not sent (no channels available)");
-  }
-}
-
-// Send notification only via SMS (legacy compatibility)
-void UserCommunication::sendSMSNotification(const String &message) {
-  #if ENABLE_SMS_ALERTS
-  if (smsComm != nullptr && smsComm->isReady()) {
-    smsComm->sendNotification(message, "");
-  }
-  #endif
-}
-
-// Send notification only via BLE (legacy compatibility)
-void UserCommunication::sendBLENotification(const String &message) {
-  #if ENABLE_BLE
-  if (bleComm != nullptr && bleComm->isConnected()) {
-    bleComm->notify(message);
-  }
-  #endif
-}
-
 // ========== Publish Status ==========
+// NOTE: Use publishStatus() for all notifications and status updates
+// This method handles compact message formatting for SMS/cellular data efficiency
 
 // Publish status to all available channels (MQTT/SMS/BLE)
 void UserCommunication::publishStatus(const String &msg) {
