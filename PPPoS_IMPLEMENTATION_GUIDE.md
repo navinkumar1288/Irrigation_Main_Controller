@@ -2,37 +2,20 @@
 
 ## Overview
 
-This guide explains how to implement PPP over Serial (PPPoS) to connect your Heltec ESP32 to the internet through the EC200U cellular modem via UART, instead of using the modem's WiFi hotspot.
+This guide explains how to use PPP over Serial (PPPoS) to connect your Heltec ESP32 to the internet through the EC200U cellular modem via UART.
 
 ## Why Use PPPoS?
 
 ### Benefits
 - **Full TCP/IP Stack**: ESP32 gets a real IP address and full internet connectivity
 - **Standard Libraries**: Use any Arduino networking library (PubSubClient, HTTPClient, etc.)
-- **Better Reliability**: More stable than WiFi hotspot mode
-- **Lower Power**: No WiFi radio active on the modem
+- **Better Reliability**: Direct serial connection to modem
+- **Lower Power**: Efficient use of modem resources
 - **Easier Debugging**: Standard networking tools work normally
-
-### When Modem WiFi Hotspot Fails
-The modem's WiFi hotspot feature (`AT+QWAP` commands) can be unreliable. PPPoS provides a more robust alternative that works at the serial protocol level.
 
 ## Architecture
 
-### Before (WiFi Hotspot Mode)
-```
-┌─────────────────────────────────────┐
-│  ESP32 Application                  │
-├─────────────────────────────────────┤
-│  ESP32 WiFi (STA mode)              │  ← Connects to modem's AP
-├─────────────────────────────────────┤
-│         ))) WiFi ((((                │
-├─────────────────────────────────────┤
-│  EC200U Modem (WiFi AP mode)        │
-│  Cellular Data Connection           │
-└─────────────────────────────────────┘
-```
-
-### After (PPPoS Mode)
+### PPPoS Mode
 ```
 ┌─────────────────────────────────────┐
 │  ESP32 Application (MQTT, HTTP)     │
@@ -78,7 +61,7 @@ PPPoS is already configured in `Config.h`:
 ```
 
 To **enable PPPoS**, set `ENABLE_PPPOS 1` (default).
-To **disable PPPoS** (use WiFi hotspot instead), set `ENABLE_PPPOS 0`.
+To **disable PPPoS**, set `ENABLE_PPPOS 0`.
 
 ### 2. PPPoS Manager Integration
 
@@ -140,7 +123,7 @@ void loop() {
 
 **Features:**
 - ✅ Works over PPPoS (cellular data via PPP)
-- ✅ Works over WiFi (direct or hotspot)
+- ✅ Works over WiFi
 - ✅ Uses standard PubSubClient library
 - ✅ Automatic reconnection with throttling
 - ✅ Detailed error state reporting

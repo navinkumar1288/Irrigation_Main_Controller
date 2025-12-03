@@ -150,7 +150,7 @@ void setup() {
   }
   #endif
 
-  // Configure network connectivity: PPPoS OR WiFi Hotspot (mutually exclusive)
+  // Configure network connectivity: PPPoS (cellular data via PPP)
   #if ENABLE_PPPOS
   // PPPoS mode - ESP32 gets internet via PPP over modem's serial port
   Serial.println("      → Configuring PPPoS (PPP over Serial)...");
@@ -177,32 +177,6 @@ void setup() {
     }
   } else {
     Serial.println("      ❌ PPPoS initialization failed");
-  }
-
-  #elif ENABLE_MODEM_HOTSPOT
-  // WiFi Hotspot mode - modem becomes a WiFi access point
-  Serial.println("      → Configuring modem WiFi hotspot...");
-
-  // Note: For hotspot, we need modem initialized
-  #if !ENABLE_SMS
-  if (sms.init()) {  // Use SMS module to initialize modem base
-    Serial.println("      ✓ Modem initialized for hotspot");
-    modemInitialized = true;
-  }
-  #endif
-
-  if (modemInitialized) {
-    if (sms.configureHotspot(MODEM_HOTSPOT_SSID, MODEM_HOTSPOT_PASS)) {
-      if (sms.startHotspot()) {
-        Serial.println("      ✓ Modem hotspot active");
-        Serial.println("      ✓ SSID: " + String(MODEM_HOTSPOT_SSID));
-        // Network will be available after WiFi connects to hotspot
-      } else {
-        Serial.println("      ⚠ Hotspot start failed");
-      }
-    } else {
-      Serial.println("      ⚠ Hotspot configuration failed");
-    }
   }
   #endif
 
