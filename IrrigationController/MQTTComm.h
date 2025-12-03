@@ -1,11 +1,11 @@
-// MQTTComm.h - MQTT v5 communication using ESP-IDF native MQTT client
+// MQTTComm.h - MQTT communication using ESP-IDF native MQTT client
 // Works with both PPPoS (cellular) and WiFi connections
-// Supports TLS/SSL and MQTT v5 protocol
+// Supports TLS/SSL and MQTT v3.1.1 protocol (v5 requires sdkconfig change)
 #ifndef MQTT_COMM_H
 #define MQTT_COMM_H
 
 #include <Arduino.h>
-#include "mqtt_client.h"  // ESP-IDF MQTT client (supports v5)
+#include "mqtt_client.h"  // ESP-IDF MQTT client
 #include "Config.h"
 
 // Callback type for incoming MQTT messages
