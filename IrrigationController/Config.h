@@ -28,13 +28,28 @@
 #define HTTP_SERVER_PORT 80
 
 // ========== Conditional Communication Logic ==========
-// If MQTT is enabled, disable SMS (MQTT takes priority)
-// If MQTT is disabled, enable SMS as fallback
-#if ENABLE_MQTT
+// Priority: PPPoS > MQTT > SMS
+// - PPPoS uses modem UART in binary (PPP) mode, preventing AT commands (SMS)
+// - MQTT (when enabled) takes priority over SMS
+// - SMS is fallback when neither PPPoS nor MQTT are enabled
+//
+// IMPORTANT: SMS AT commands DO NOT WORK while PPPoS is active!
+// The modem UART is in PPP binary mode, not AT command mode.
+//
+// Enable SMS only if BOTH PPPoS and MQTT are disabled
+#if defined(ENABLE_PPPOS) && ENABLE_PPPOS
+  // PPPoS mode - modem UART in PPP binary mode, SMS unavailable
+  #define ENABLE_SMS 0
+  #define ENABLE_SMS_COMMANDS 0
+  #define ENABLE_SMS_ALERTS 0
+  #warning "SMS disabled: PPPoS uses modem UART in binary mode (not compatible with AT commands)"
+#elif ENABLE_MQTT
+  // MQTT mode - SMS disabled (MQTT takes priority)
   #define ENABLE_SMS 0
   #define ENABLE_SMS_COMMANDS 0
   #define ENABLE_SMS_ALERTS 0
 #else
+  // Fallback - Enable SMS when neither PPPoS nor MQTT are active
   #define ENABLE_SMS 1
   #define ENABLE_SMS_COMMANDS 1
   #define ENABLE_SMS_ALERTS 1

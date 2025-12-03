@@ -639,22 +639,8 @@ void UserCommunication::processBackground() {
   // Process MQTT background (handles auto-reconnect, URCs)
   #if ENABLE_MQTT
   if (mqttComm != nullptr) {
+    // Process MQTT background tasks (handles auto-reconnection)
     mqttComm->processBackground();
-
-    // Check if MQTT needs reconfiguration after modem restart
-    // Note: needsReconfiguration() now handles throttling and attempt limiting
-    if (mqttComm->needsReconfiguration()) {
-      Serial.println("[UserComm] ⚠ MQTT needs reconfiguration, waiting for modem...");
-      // Wait for modem to be fully initialized (detected via +QIND: SMS DONE)
-      // This typically takes 5-6 seconds after RDY
-      delay(6000);
-      if (mqttComm->configure()) {
-        Serial.println("[UserComm] ✓ MQTT reconfigured successfully");
-      } else {
-        Serial.println("[UserComm] ❌ MQTT reconfiguration failed (will retry with backoff)");
-        // Don't block here - let SMS reconfigure too
-      }
-    }
   }
   #endif
 

@@ -7,7 +7,7 @@
 #include "TimeManager.h"
 #include "DisplayManager.h"
 #include "LoRaComm.h"
-#include "ModemMQTT.h"        // MQTT module
+#include "MQTTComm.h"          // MQTT module (ESP32 native, works with PPPoS/WiFi)
 #include "ModemSMS.h"         // SMS module
 #include "BLEComm.h"
 #include "WiFiComm.h"         // WiFi module
@@ -41,7 +41,7 @@ StorageManager storage;
 TimeManager timeManager;
 DisplayManager displayMgr;
 LoRaComm loraComm;
-ModemMQTT mqtt;               // MQTT instance
+MQTTComm mqtt;                // MQTT instance (ESP32 native)
 ModemSMS sms;                 // SMS instance
 BLEComm bleComm;
 WiFiComm wifiComm;            // WiFi instance
@@ -126,104 +126,87 @@ void setup() {
   }
   #endif
   
-  // Initialize Modem (base initialization)
-  Serial.println("[7/9] Modem...");
+  // Initialize Modem/Network
+  Serial.println("[7/9] Modem/Network...");
   #if ENABLE_MODEM
   bool modemInitialized = false;
+  bool networkAvailable = false;
 
-  // Initialize modem base - use MQTT if enabled, otherwise use SMS
-  #if ENABLE_MQTT
-  if (mqtt.init()) {
-    Serial.println("      ✓ Modem initialized via MQTT");
-    modemInitialized = true;
-  }
-  #elif ENABLE_SMS
+  // Initialize modem base (for SMS and AT commands)
+  #if ENABLE_SMS
   if (sms.init()) {
-    Serial.println("      ✓ Modem initialized via SMS");
+    Serial.println("      ✓ Modem initialized");
     modemInitialized = true;
-  }
-  #endif
 
-  if (modemInitialized) {
-    // Configure SMS FIRST (if enabled)
-    // SMS configuration is fast and critical for receiving commands
-    // Must happen before MQTT to avoid losing SMS during MQTT setup delays
-    #if ENABLE_SMS
+    // Configure SMS
     Serial.println("      → Configuring SMS...");
     if (sms.configure()) {
       Serial.println("      ✓ SMS configured");
     } else {
       Serial.println("      ❌ SMS configuration failed");
     }
-    #endif
-
-    // Configure MQTT SECOND (if enabled and modem initialized via MQTT)
-    // MQTT takes longer due to network/broker connection
-    // SMS URCs arriving during MQTT setup will be forwarded to SMS handler
-    #if ENABLE_MQTT
-    Serial.println("      → Configuring MQTT...");
-    if (mqtt.configure()) {
-      Serial.println("      ✓ MQTT configured");
-      // Subscribe to command topics
-      mqtt.subscribe(MQTT_TOPIC_COMMANDS);
-      Serial.println("      ✓ Subscribed to commands");
-    } else {
-      Serial.println("      ❌ MQTT configuration failed");
-    }
-    #endif
-
-    // Configure PPPoS OR WiFi Hotspot (mutually exclusive)
-    #if ENABLE_PPPOS
-    // PPPoS mode - ESP32 gets internet via PPP over modem's serial port
-    Serial.println("      → Configuring PPPoS (PPP over Serial)...");
-    if (pppos.init(&SerialAT, PPPOS_APN)) {
-      Serial.println("      ✓ PPPoS initialized");
-
-      Serial.println("      → Connecting to cellular network via PPP...");
-      if (pppos.connect(PPPOS_CONNECT_TIMEOUT_MS)) {
-        Serial.println("      ✓ PPPoS connected!");
-        Serial.println("      ✓ IP: " + pppos.getLocalIP());
-
-        // Note: You can now use standard MQTT/HTTP libraries
-        // Example: PubSubClient for MQTT instead of ModemMQTT
-      } else {
-        Serial.println("      ❌ PPPoS connection failed");
-        Serial.println("      ℹ Check: SIM card, network registration, APN");
-      }
-    } else {
-      Serial.println("      ❌ PPPoS initialization failed");
-    }
-    #elif ENABLE_MODEM_HOTSPOT
-    // WiFi Hotspot mode - modem becomes a WiFi access point
-    Serial.println("      → Configuring modem WiFi hotspot...");
-    #if ENABLE_MQTT
-    if (mqtt.configureHotspot(MODEM_HOTSPOT_SSID, MODEM_HOTSPOT_PASS)) {
-      if (mqtt.startHotspot()) {
-        Serial.println("      ✓ Modem hotspot active");
-        Serial.println("      ✓ SSID: " + String(MODEM_HOTSPOT_SSID));
-      } else {
-        Serial.println("      ⚠ Hotspot start failed");
-      }
-    } else {
-      Serial.println("      ⚠ Hotspot configuration failed");
-    }
-    #elif ENABLE_SMS
-    if (sms.configureHotspot(MODEM_HOTSPOT_SSID, MODEM_HOTSPOT_PASS)) {
-      if (sms.startHotspot()) {
-        Serial.println("      ✓ Modem hotspot active");
-        Serial.println("      ✓ SSID: " + String(MODEM_HOTSPOT_SSID));
-      } else {
-        Serial.println("      ⚠ Hotspot start failed");
-      }
-    } else {
-      Serial.println("      ⚠ Hotspot configuration failed");
-    }
-    #endif
-    #endif
   } else {
     Serial.println("      ❌ Modem initialization failed");
   }
   #endif
+
+  // Configure network connectivity: PPPoS OR WiFi Hotspot (mutually exclusive)
+  #if ENABLE_PPPOS
+  // PPPoS mode - ESP32 gets internet via PPP over modem's serial port
+  Serial.println("      → Configuring PPPoS (PPP over Serial)...");
+
+  // Note: For PPPoS, we need to initialize modem first (even without SMS)
+  #if !ENABLE_SMS
+  if (sms.init()) {  // Use SMS module to initialize modem base
+    Serial.println("      ✓ Modem initialized for PPPoS");
+    modemInitialized = true;
+  }
+  #endif
+
+  if (modemInitialized && pppos.init(&SerialAT, PPPOS_APN)) {
+    Serial.println("      ✓ PPPoS initialized");
+
+    Serial.println("      → Connecting to cellular network via PPP...");
+    if (pppos.connect(PPPOS_CONNECT_TIMEOUT_MS)) {
+      Serial.println("      ✓ PPPoS connected!");
+      Serial.println("      ✓ IP: " + pppos.getLocalIP());
+      networkAvailable = true;
+    } else {
+      Serial.println("      ❌ PPPoS connection failed");
+      Serial.println("      ℹ Check: SIM card, network registration, APN");
+    }
+  } else {
+    Serial.println("      ❌ PPPoS initialization failed");
+  }
+
+  #elif ENABLE_MODEM_HOTSPOT
+  // WiFi Hotspot mode - modem becomes a WiFi access point
+  Serial.println("      → Configuring modem WiFi hotspot...");
+
+  // Note: For hotspot, we need modem initialized
+  #if !ENABLE_SMS
+  if (sms.init()) {  // Use SMS module to initialize modem base
+    Serial.println("      ✓ Modem initialized for hotspot");
+    modemInitialized = true;
+  }
+  #endif
+
+  if (modemInitialized) {
+    if (sms.configureHotspot(MODEM_HOTSPOT_SSID, MODEM_HOTSPOT_PASS)) {
+      if (sms.startHotspot()) {
+        Serial.println("      ✓ Modem hotspot active");
+        Serial.println("      ✓ SSID: " + String(MODEM_HOTSPOT_SSID));
+        // Network will be available after WiFi connects to hotspot
+      } else {
+        Serial.println("      ⚠ Hotspot start failed");
+      }
+    } else {
+      Serial.println("      ⚠ Hotspot configuration failed");
+    }
+  }
+  #endif
+
+  #endif // ENABLE_MODEM
   
   // Initialize BLE
   Serial.println("[8/11] BLE...");
@@ -260,6 +243,49 @@ void setup() {
   }
   #else
   Serial.println("      ⚠ HTTP API requires WiFi (ENABLE_WIFI=0)");
+  #endif
+  #endif
+
+  // Initialize MQTT (if enabled and network available)
+  Serial.println("[10.5/11] MQTT...");
+  #if ENABLE_MQTT
+  // Check if network is available (PPPoS or WiFi)
+  #if ENABLE_PPPOS
+  if (networkAvailable) {
+    Serial.println("      → MQTT over PPPoS...");
+    if (mqtt.init()) {
+      if (mqtt.configure()) {
+        Serial.println("      ✓ MQTT connected to broker");
+        mqtt.subscribe(MQTT_TOPIC_COMMANDS);
+        Serial.println("      ✓ Subscribed to commands");
+      } else {
+        Serial.println("      ❌ MQTT broker connection failed");
+      }
+    } else {
+      Serial.println("      ❌ MQTT initialization failed");
+    }
+  } else {
+    Serial.println("      ⚠ MQTT skipped (PPPoS not connected)");
+  }
+  #elif ENABLE_WIFI
+  if (wifiComm.isConnected()) {
+    Serial.println("      → MQTT over WiFi...");
+    if (mqtt.init()) {
+      if (mqtt.configure()) {
+        Serial.println("      ✓ MQTT connected to broker");
+        mqtt.subscribe(MQTT_TOPIC_COMMANDS);
+        Serial.println("      ✓ Subscribed to commands");
+      } else {
+        Serial.println("      ❌ MQTT broker connection failed");
+      }
+    } else {
+      Serial.println("      ❌ MQTT initialization failed");
+    }
+  } else {
+    Serial.println("      ⚠ MQTT skipped (WiFi not connected)");
+  }
+  #else
+  Serial.println("      ⚠ MQTT requires PPPoS or WiFi");
   #endif
   #endif
 
