@@ -150,6 +150,12 @@
 #define PPPOS_APN MODEM_APN           // APN for PPP connection
 #define PPPOS_CONNECT_TIMEOUT_MS 30000 // PPP connection timeout (30 seconds)
 
+// ========== Network Manager Settings ==========
+// NetworkManager handles automatic fallback between PPPoS and WiFi
+// Connection priority: PPPoS (cellular) → WiFi (fallback)
+// If PPPoS fails, automatically tries WiFi connection
+#define NETWORK_RECONNECT_INTERVAL_MS 60000  // Auto-reconnect interval (60 seconds)
+
 // ========== SMS Settings ==========
 #define SMS_ALERT_PHONE_1 "+919944272647"
 #define SMS_ALERT_PHONE_2 ""  // Leave empty if not used (was invalid: +0987654321)
