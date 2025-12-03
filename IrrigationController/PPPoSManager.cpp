@@ -115,7 +115,7 @@ bool PPPoSManager::connect(uint32_t timeout_ms) {
   // Wait for CONNECT response
   unsigned long start = millis();
   bool gotConnect = false;
-  String response = "";
+  response = "";  // Clear and reuse existing variable
 
   while (millis() - start < 10000) {
     while (modemSerial->available()) {
