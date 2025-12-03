@@ -112,6 +112,11 @@ void WiFiComm::processBackground() {
     return;
   }
 
+  // Don't auto-reconnect if WiFi was intentionally disabled (e.g., PPPoS is active)
+  if (WiFi.getMode() == WIFI_OFF) {
+    return;
+  }
+
   unsigned long now = millis();
 
   // Periodic status check
