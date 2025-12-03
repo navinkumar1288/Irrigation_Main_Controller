@@ -28,6 +28,29 @@ MQTTComm::MQTTComm() : mqtt(espClient), configured(false), lastReconnectAttempt(
 bool MQTTComm::init() {
   Serial.println("[MQTT] Initializing MQTT client...");
 
+#if MQTT_USE_SSL
+  // Configure SSL/TLS settings
+  Serial.println("[MQTT] → Configuring TLS/SSL...");
+
+  // Option 1: Skip certificate validation (NOT RECOMMENDED for production)
+  // Use this for testing or if you don't have the CA certificate
+  espClient.setInsecure();
+  Serial.println("[MQTT] ⚠ TLS certificate validation disabled (testing mode)");
+
+  // Option 2: Use CA certificate (RECOMMENDED for production)
+  // Uncomment and add your CA certificate below:
+  /*
+  const char* emqx_ca_cert = \
+    "-----BEGIN CERTIFICATE-----\n" \
+    "Your CA certificate content here\n" \
+    "-----END CERTIFICATE-----\n";
+  espClient.setCACert(emqx_ca_cert);
+  Serial.println("[MQTT] ✓ TLS CA certificate loaded");
+  */
+
+  Serial.println("[MQTT] ✓ TLS/SSL configured");
+#endif
+
   // Configure MQTT client
   mqtt.setServer(MQTT_BROKER, MQTT_PORT);
   mqtt.setCallback(mqttCallbackWrapper);
@@ -36,6 +59,11 @@ bool MQTTComm::init() {
 
   Serial.println("[MQTT] ✓ MQTT client initialized");
   Serial.println("[MQTT] Broker: " + String(MQTT_BROKER) + ":" + String(MQTT_PORT));
+#if MQTT_USE_SSL
+  Serial.println("[MQTT] Protocol: MQTT over TLS/SSL (port 8883)");
+#else
+  Serial.println("[MQTT] Protocol: MQTT (port 1883)");
+#endif
 
   return true;
 }

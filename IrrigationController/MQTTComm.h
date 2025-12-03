@@ -1,10 +1,12 @@
 // MQTTComm.h - MQTT communication using ESP32 native networking
 // Works with both PPPoS (cellular) and WiFi connections
+// Supports TLS/SSL for secure MQTT connections
 #ifndef MQTT_COMM_H
 #define MQTT_COMM_H
 
 #include <Arduino.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include "Config.h"
 
@@ -13,7 +15,11 @@ typedef void (*MQTTMessageCallback)(const String &topic, const String &payload);
 
 class MQTTComm {
 private:
-  WiFiClient espClient;
+#if MQTT_USE_SSL
+  WiFiClientSecure espClient;  // Secure client for TLS/SSL
+#else
+  WiFiClient espClient;         // Standard client for non-SSL
+#endif
   PubSubClient mqtt;
   bool configured;
   unsigned long lastReconnectAttempt;
