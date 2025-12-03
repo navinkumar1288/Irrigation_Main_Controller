@@ -19,8 +19,13 @@ enum PPPState {
   PPP_ERROR
 };
 
+// Forward declaration for friend function
+static uint32_t ppp_output_callback(void *param, uint8_t *data, uint32_t len);
+
 class PPPoSManager {
 private:
+  // Allow callback to access private members
+  friend uint32_t ppp_output_callback(void *param, uint8_t *data, uint32_t len);
   HardwareSerial *modemSerial;
   esp_netif_t *ppp_netif;
   PPPState state;
