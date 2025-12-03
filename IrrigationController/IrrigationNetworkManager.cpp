@@ -64,7 +64,7 @@ bool IrrigationNetworkManager::connect(uint32_t pppos_timeout_ms, uint32_t wifi_
     if (tryWiFi(wifi_timeout_ms)) {
       activeConnection = ConnectionType::WIFI;
       state = NetworkState::CONNECTED;
-      localIP = wifiComm->getLocalIP();
+      localIP = wifiComm->getIPAddress();
 
       Serial.println("[NetMgr] ========================================");
       Serial.println("[NetMgr] ✓ NETWORK CONNECTED VIA WIFI");
@@ -139,23 +139,18 @@ bool IrrigationNetworkManager::tryWiFi(uint32_t timeout_ms) {
 
   state = NetworkState::CONNECTING_WIFI;
 
-  Serial.println("[NetMgr] → Initializing WiFi...");
-  if (!wifiComm->init()) {
-    Serial.println("[NetMgr] ❌ WiFi initialization failed");
-    return false;
-  }
-
   Serial.println("[NetMgr] → Connecting to WiFi network...");
   Serial.println("[NetMgr] SSID: " + String(WIFI_SSID));
   Serial.println("[NetMgr] Timeout: " + String(timeout_ms / 1000) + " seconds");
 
-  if (wifiComm->connect(timeout_ms)) {
+  // WiFiComm::init() handles connection internally
+  if (wifiComm->init(WIFI_SSID, WIFI_PASS)) {
     Serial.println("[NetMgr] ✓ WiFi connected!");
-    Serial.println("[NetMgr] ✓ IP: " + wifiComm->getLocalIP());
+    Serial.println("[NetMgr] ✓ IP: " + wifiComm->getIPAddress());
     return true;
   }
 
-  Serial.println("[NetMgr] ❌ WiFi connection timeout");
+  Serial.println("[NetMgr] ❌ WiFi connection failed");
   return false;
 #else
   Serial.println("[NetMgr] ⚠ WiFi disabled in Config.h");
@@ -251,8 +246,9 @@ bool IrrigationNetworkManager::disconnect() {
     case ConnectionType::WIFI:
 #if ENABLE_WIFI
       if (wifiComm != nullptr) {
-        success = wifiComm->disconnect();
+        wifiComm->disconnect();
         Serial.println("[NetMgr] WiFi disconnected");
+        success = true;
       }
 #endif
       break;
