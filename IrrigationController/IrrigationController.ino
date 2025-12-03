@@ -16,6 +16,7 @@
 #include "NodeCommunication.h"  // NEW: Node communication module
 #include "UserCommunication.h"  // NEW: User communication module
 #include "PPPoSManager.h"       // PPPoS cellular data module
+#include "NetworkManager.h"     // Unified network manager (PPPoS/WiFi fallback)
 
 // ========== Global Variable Definitions ==========
 SystemConfig sysConfig;
@@ -49,7 +50,8 @@ HTTPComm httpComm;            // HTTP API instance
 ScheduleManager scheduleMgr;
 NodeCommunication nodeComm;   // NEW: Node communication module
 UserCommunication userComm;   // NEW: User communication module
-PPPoSManager pppos;           // NEW: PPPoS cellular data module
+PPPoSManager pppos;           // PPPoS cellular data module
+NetworkManager networkMgr;    // Unified network manager (PPPoS/WiFi fallback)
 
 TwoWire WireRTC = TwoWire(1);
 RTC_DS3231 rtc;
@@ -150,38 +152,37 @@ void setup() {
   }
   #endif
 
-  // Configure network connectivity: PPPoS (cellular data via PPP)
-  #if ENABLE_PPPOS
-  // PPPoS mode - ESP32 gets internet via PPP over modem's serial port
-  Serial.println("      → Configuring PPPoS (PPP over Serial)...");
-
+  // Configure network connectivity with automatic fallback (PPPoS → WiFi)
+  #if ENABLE_PPPOS || ENABLE_WIFI
   // Note: For PPPoS, we need to initialize modem first (even without SMS)
-  #if !ENABLE_SMS
+  #if ENABLE_PPPOS && !ENABLE_SMS
   if (sms.init()) {  // Use SMS module to initialize modem base
-    Serial.println("      ✓ Modem initialized for PPPoS");
+    Serial.println("      ✓ Modem initialized for network connectivity");
     modemInitialized = true;
   }
   #endif
 
-  if (modemInitialized && pppos.init(&SerialAT, PPPOS_APN)) {
-    Serial.println("      ✓ PPPoS initialized");
+  // Initialize NetworkManager with PPPoS and WiFi fallback
+  Serial.println("      → Initializing Network Manager...");
+  networkMgr.init(&pppos, &wifiComm, &SerialAT);
+  networkMgr.setReconnectInterval(NETWORK_RECONNECT_INTERVAL_MS);
 
-    Serial.println("      → Connecting to cellular network via PPP...");
-    if (pppos.connect(PPPOS_CONNECT_TIMEOUT_MS)) {
-      Serial.println("      ✓ PPPoS connected!");
-      Serial.println("      ✓ IP: " + pppos.getLocalIP());
-      networkAvailable = true;
-    } else {
-      Serial.println("      ❌ PPPoS connection failed");
-      Serial.println("      ℹ Check: SIM card, network registration, APN");
-    }
+  // Attempt connection with automatic fallback (PPPoS → WiFi)
+  Serial.println("      → Connecting to network (PPPoS → WiFi fallback)...");
+  if (networkMgr.connect(PPPOS_CONNECT_TIMEOUT_MS, WIFI_CONNECT_TIMEOUT_MS)) {
+    networkAvailable = true;
+    Serial.println("      ✓ Network connected!");
+    Serial.println("      ✓ Connection: " +
+                   String(networkMgr.getConnectionType() == ConnectionType::PPPOS ? "PPPoS (Cellular)" : "WiFi"));
+    Serial.println("      ✓ IP: " + networkMgr.getLocalIP());
   } else {
-    Serial.println("      ❌ PPPoS initialization failed");
+    Serial.println("      ❌ All network connections failed");
+    Serial.println("      ℹ Check: SIM card, WiFi credentials, network availability");
   }
   #endif
 
   #endif // ENABLE_MODEM
-  
+
   // Initialize BLE
   Serial.println("[8/11] BLE...");
   #if ENABLE_BLE
@@ -191,29 +192,20 @@ void setup() {
   }
   #endif
 
-  // Initialize WiFi
-  Serial.println("[9/11] WiFi...");
-  #if ENABLE_WIFI
-  if (wifiComm.init(WIFI_SSID, WIFI_PASS)) {
-    Serial.println("      ✓ WiFi connected");
-    Serial.println("      ✓ IP: " + wifiComm.getIPAddress());
-  } else {
-    Serial.println("      ⚠ WiFi connection failed (will retry in background)");
-  }
-  #endif
-
-  // Initialize HTTP API (requires WiFi)
+  // Initialize HTTP API (requires WiFi - local network access)
   Serial.println("[10/11] HTTP API...");
   #if ENABLE_HTTP
   #if ENABLE_WIFI
-  if (wifiComm.isConnected()) {
+  // HTTP API only works with WiFi (needs local network, not cellular)
+  if (networkAvailable && networkMgr.getConnectionType() == ConnectionType::WIFI) {
     if (httpComm.init(HTTP_SERVER_PORT)) {
       Serial.println("      ✓ HTTP API started on port " + String(HTTP_SERVER_PORT));
+      Serial.println("      ✓ Access at: http://" + networkMgr.getLocalIP() + ":" + String(HTTP_SERVER_PORT));
     } else {
       Serial.println("      ❌ HTTP API failed");
     }
   } else {
-    Serial.println("      ⚠ HTTP API skipped (WiFi not connected)");
+    Serial.println("      ⚠ HTTP API skipped (WiFi not active)");
   }
   #else
   Serial.println("      ⚠ HTTP API requires WiFi (ENABLE_WIFI=0)");
@@ -223,10 +215,10 @@ void setup() {
   // Initialize MQTT (if enabled and network available)
   Serial.println("[10.5/11] MQTT...");
   #if ENABLE_MQTT
-  // Check if network is available (PPPoS or WiFi)
-  #if ENABLE_PPPOS
-  if (networkAvailable) {
-    Serial.println("      → MQTT over PPPoS...");
+  if (networkAvailable && networkMgr.isConnected()) {
+    Serial.print("      → MQTT over ");
+    Serial.println(networkMgr.getConnectionType() == ConnectionType::PPPOS ? "PPPoS..." : "WiFi...");
+
     if (mqtt.init()) {
       if (mqtt.configure()) {
         Serial.println("      ✓ MQTT connected to broker");
@@ -239,28 +231,8 @@ void setup() {
       Serial.println("      ❌ MQTT initialization failed");
     }
   } else {
-    Serial.println("      ⚠ MQTT skipped (PPPoS not connected)");
+    Serial.println("      ⚠ MQTT skipped (no network connection)");
   }
-  #elif ENABLE_WIFI
-  if (wifiComm.isConnected()) {
-    Serial.println("      → MQTT over WiFi...");
-    if (mqtt.init()) {
-      if (mqtt.configure()) {
-        Serial.println("      ✓ MQTT connected to broker");
-        mqtt.subscribe(MQTT_TOPIC_COMMANDS);
-        Serial.println("      ✓ Subscribed to commands");
-      } else {
-        Serial.println("      ❌ MQTT broker connection failed");
-      }
-    } else {
-      Serial.println("      ❌ MQTT initialization failed");
-    }
-  } else {
-    Serial.println("      ⚠ MQTT skipped (WiFi not connected)");
-  }
-  #else
-  Serial.println("      ⚠ MQTT requires PPPoS or WiFi");
-  #endif
   #endif
 
   // Initialize UserCommunication module (depends on SMS, BLE, LoRa, MQTT, WiFi, HTTP)
@@ -382,9 +354,9 @@ unsigned long lastSMSCheck = 0;
 unsigned long lastHeartbeat = 0;  // For debug heartbeat
 
 void loop() {
-  // Feed PPPoS stack (CRITICAL if using PPPoS for cellular data)
-  #if ENABLE_PPPOS
-  pppos.loop();  // Must be called frequently to feed serial data to PPP stack
+  // Process network connectivity (CRITICAL for PPPoS and auto-reconnection)
+  #if ENABLE_PPPOS || ENABLE_WIFI
+  networkMgr.processBackground();  // Feeds PPP stack & handles auto-reconnection
   #endif
 
   // Debug heartbeat - print every 30 seconds to confirm loop is running

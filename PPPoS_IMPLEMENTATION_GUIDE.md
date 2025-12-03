@@ -73,31 +73,37 @@ PPPoS is **already integrated** into `IrrigationController.ino`:
 
 ### 3. How It Works (Already Implemented)
 
-The main controller automatically:
+The main controller uses **NetworkManager** for automatic fallback between PPPoS and WiFi:
 
 **In setup():**
 ```cpp
-// Modem initialization happens first (SMS/MQTT)
-// Then PPPoS is configured (if ENABLE_PPPOS is set)
+// Initialize NetworkManager with PPPoS and WiFi fallback
+networkMgr.init(&pppos, &wifiComm, &SerialAT);
+networkMgr.setReconnectInterval(NETWORK_RECONNECT_INTERVAL_MS);
 
-#if ENABLE_PPPOS
-if (pppos.init(&SerialAT, PPPOS_APN)) {
-  if (pppos.connect(PPPOS_CONNECT_TIMEOUT_MS)) {
-    Serial.println("✓ PPPoS connected!");
-    Serial.println("✓ IP: " + pppos.getLocalIP());
-  }
+// Attempt connection with automatic fallback (PPPoS → WiFi)
+if (networkMgr.connect(PPPOS_CONNECT_TIMEOUT_MS, WIFI_CONNECT_TIMEOUT_MS)) {
+  Serial.println("✓ Network connected!");
+  Serial.println("✓ Connection: " +
+    String(networkMgr.getConnectionType() == ConnectionType::PPPOS ? "PPPoS (Cellular)" : "WiFi"));
+  Serial.println("✓ IP: " + networkMgr.getLocalIP());
 }
-#endif
 ```
 
 **In loop():**
 ```cpp
-#if ENABLE_PPPOS
-pppos.loop();  // CRITICAL: Feeds serial data to PPP stack
+#if ENABLE_PPPOS || ENABLE_WIFI
+networkMgr.processBackground();  // Feeds PPP stack & handles auto-reconnection
 #endif
 ```
 
-**No additional code needed!** Just set `ENABLE_PPPOS 1` in `Config.h` and flash the firmware.
+**Automatic Fallback:**
+- NetworkManager tries PPPoS first (cellular connection)
+- If PPPoS fails, automatically tries WiFi
+- Automatic reconnection if connection drops
+- Transparent to MQTT and other network services
+
+**No additional code needed!** Just set `ENABLE_PPPOS 1` and `ENABLE_WIFI 1` in `Config.h` and flash the firmware.
 
 ### 4. MQTT Over PPPoS/WiFi (Already Implemented!)
 
@@ -345,20 +351,25 @@ void loop() {
 ```
 Irrigation_Main_Controller/
 ├── IrrigationController/
-│   ├── IrrigationController.ino  # Main controller (PPPoS integrated!)
+│   ├── IrrigationController.ino  # Main controller (NetworkManager integrated!)
+│   ├── NetworkManager.h          # Unified network manager (PPPoS/WiFi fallback)
+│   ├── NetworkManager.cpp        # Network manager implementation
 │   ├── PPPoSManager.h            # PPPoS manager header
 │   ├── PPPoSManager.cpp          # PPPoS manager implementation
-│   └── Config.h                  # Updated with PPPoS settings (ENABLE_PPPOS)
+│   ├── WiFiComm.h                # WiFi communication module
+│   ├── WiFiComm.cpp              # WiFi implementation
+│   └── Config.h                  # Updated with network settings
 └── PPPoS_IMPLEMENTATION_GUIDE.md # This guide
 ```
 
 ## How to Use
 
-### Quick Start (PPPoS Already Integrated!)
+### Quick Start (NetworkManager with Automatic Fallback!)
 
-1. **Enable PPPoS** in `Config.h`:
+1. **Enable PPPoS and WiFi** in `Config.h`:
    ```cpp
-   #define ENABLE_PPPOS 1  // Enable PPP mode
+   #define ENABLE_PPPOS 1  // Enable PPP mode (primary)
+   #define ENABLE_WIFI 1   // Enable WiFi (fallback)
    ```
 
 2. **Set your APN** (already configured for Airtel):
@@ -366,25 +377,44 @@ Irrigation_Main_Controller/
    #define PPPOS_APN "airtelgprs.com"
    ```
 
-3. **Flash the firmware** to your ESP32
-
-4. **Monitor serial output**:
+3. **Configure WiFi credentials**:
+   ```cpp
+   #define WIFI_SSID "your_wifi_ssid"
+   #define WIFI_PASS "your_wifi_password"
    ```
-   [7/9] Modem...
-         ✓ Modem initialized via SMS
-         → Configuring PPPoS (PPP over Serial)...
-         ✓ PPPoS initialized
-         → Connecting to cellular network via PPP...
+
+4. **Flash the firmware** to your ESP32
+
+5. **Monitor serial output**:
+   ```
+   [7/9] Modem/Network...
+         → Initializing Network Manager...
+         → Connecting to network (PPPoS → WiFi fallback)...
+         [1/2] Attempting PPPoS connection...
          ✓ PPPoS connected!
          ✓ IP: 10.xxx.xxx.xxx
+         ✓ Network connected!
+         ✓ Connection: PPPoS (Cellular)
 
    ========================================
    ✓ SETUP COMPLETE
    ========================================
-   PPPoS:   CONNECTED (10.xxx.xxx.xxx)
+   Network: CONNECTED (PPPoS - 10.xxx.xxx.xxx)
    ```
 
-5. **Done!** ESP32 now has internet via cellular PPP
+   **If PPPoS fails, NetworkManager automatically tries WiFi:**
+   ```
+   [1/2] Attempting PPPoS connection...
+   ❌ PPPoS connection failed
+   → Falling back to WiFi...
+   [2/2] Attempting WiFi connection...
+   ✓ WiFi connected!
+   ✓ IP: 192.168.1.xxx
+   ✓ Network connected!
+   ✓ Connection: WiFi
+   ```
+
+6. **Done!** ESP32 now has internet via cellular PPP or WiFi with automatic fallback
 
 ### MQTT Configuration
 
