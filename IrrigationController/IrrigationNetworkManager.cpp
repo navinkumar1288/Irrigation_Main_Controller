@@ -3,6 +3,7 @@
 #include "IrrigationNetworkManager.h"
 #include "PPPoSManager.h"
 #include "WiFiComm.h"
+#include <WiFi.h>
 
 IrrigationNetworkManager::IrrigationNetworkManager()
   : ppposManager(nullptr),
@@ -41,6 +42,13 @@ bool IrrigationNetworkManager::connect(uint32_t pppos_timeout_ms, uint32_t wifi_
       activeConnection = ConnectionType::PPPOS;
       state = NetworkState::CONNECTED;
       localIP = ppposManager->getLocalIP();
+
+      // Disable WiFi to prevent auto-reconnect interference
+      #if ENABLE_WIFI
+      Serial.println("[NetMgr] → Disabling WiFi (PPPoS active)");
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+      #endif
 
       Serial.println("[NetMgr] ========================================");
       Serial.println("[NetMgr] ✓ NETWORK CONNECTED VIA PPPOS");

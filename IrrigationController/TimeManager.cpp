@@ -48,24 +48,25 @@ bool TimeManager::init(TwoWire *wire) {
 
 bool TimeManager::connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return true;
-  
-  Serial.println("[WiFi] Connecting...");
+
+  Serial.println("[TimeManager] Connecting WiFi for NTP sync...");
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(false);  // Disable auto-reconnect (managed by NetworkManager)
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  
+
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
     delay(200);
     Serial.print(".");
   }
   Serial.println();
-  
+
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("✓ WiFi connected");
+    Serial.println("[TimeManager] ✓ WiFi connected for NTP");
     return true;
   }
-  
-  Serial.println("❌ WiFi connection failed");
+
+  Serial.println("[TimeManager] ❌ WiFi connection failed");
   return false;
 }
 
@@ -73,7 +74,7 @@ void TimeManager::disconnectWiFi() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   delay(100);
-  Serial.println("✓ WiFi disconnected");
+  Serial.println("[TimeManager] ✓ WiFi disconnected");
 }
 
 bool TimeManager::syncViaWiFiNTP() {
