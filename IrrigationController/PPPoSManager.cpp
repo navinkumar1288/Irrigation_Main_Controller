@@ -106,7 +106,28 @@ bool PPPoSManager::connect(uint32_t timeout_ms) {
   }
   delay(500);
 
-  // Step 3: Dial PPP connection
+  // Step 3: Deactivate PDP context if active (required for PPP dial)
+  Serial.println("[PPPoS] → Checking if PDP context is active...");
+  clearSerialBuffer();
+  modemSerial->println("AT+QIACT?");
+  response = readModemResponse(2000);
+
+  if (response.indexOf("+QIACT: 1,1,1") >= 0) {
+    // Context 1 is active in AT command mode - must deactivate for PPP
+    Serial.println("[PPPoS] ⚠ PDP context active in AT mode, deactivating for PPP...");
+
+    if (!sendATCommand("AT+QIDEACT=1", 5000)) {
+      Serial.println("[PPPoS] ⚠ Deactivation failed or already inactive");
+      // Continue anyway - might already be inactive
+    } else {
+      Serial.println("[PPPoS] ✓ PDP context deactivated");
+    }
+    delay(1000);  // Wait for deactivation to complete
+  } else {
+    Serial.println("[PPPoS] ✓ PDP context not active in AT mode");
+  }
+
+  // Step 4: Dial PPP connection
   Serial.println("[PPPoS] → Dialing PPP (ATD*99#)...");
   state = PPP_DIALING;
 
@@ -150,7 +171,7 @@ bool PPPoSManager::connect(uint32_t timeout_ms) {
   // Small delay after CONNECT
   delay(100);
 
-  // Step 4: Create PPP netif
+  // Step 5: Create PPP netif
   esp_netif_config_t netif_ppp_config = ESP_NETIF_DEFAULT_PPP();
   ppp_netif = esp_netif_new(&netif_ppp_config);
 
