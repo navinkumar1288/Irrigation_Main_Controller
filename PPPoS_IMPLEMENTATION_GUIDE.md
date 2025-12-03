@@ -69,67 +69,62 @@ The modem's WiFi hotspot feature (`AT+QWAP` commands) can be unreliable. PPPoS p
 
 ### 1. PPPoS Configuration (Config.h)
 
-Add to your `Config.h`:
+PPPoS is already configured in `Config.h`:
 ```cpp
 // ========== PPPoS Settings ==========
-#define ENABLE_PPPOS 1                // Enable PPPoS mode
+#define ENABLE_PPPOS 1                // Enable PPPoS mode (1 = PPP, 0 = AT command mode)
 #define PPPOS_APN "airtelgprs.com"    // Your carrier's APN
 #define PPPOS_CONNECT_TIMEOUT_MS 30000 // 30 second timeout
 ```
 
+To **enable PPPoS**, set `ENABLE_PPPOS 1` (default).
+To **disable PPPoS** (use WiFi hotspot instead), set `ENABLE_PPPOS 0`.
+
 ### 2. PPPoS Manager Integration
 
-The project includes:
+PPPoS is **already integrated** into `IrrigationController.ino`:
 - `PPPoSManager.h` - PPPoS manager class header
 - `PPPoSManager.cpp` - PPPoS manager implementation
+- Automatically initialized in `setup()`
+- Automatically called in `loop()`
 
-### 3. Basic Usage Example
+### 3. How It Works (Already Implemented)
 
+The main controller automatically:
+
+**In setup():**
 ```cpp
-#include "PPPoSManager.h"
-#include "Config.h"
+// Modem initialization happens first (SMS/MQTT)
+// Then PPPoS is configured (if ENABLE_PPPOS is set)
 
-PPPoSManager pppos;
-HardwareSerial ModemSerial(1);
-
-void setup() {
-  Serial.begin(115200);
-
-  // Initialize modem serial
-  ModemSerial.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
-  delay(1000);
-
-  // Initialize PPPoS
-  if (!pppos.init(&ModemSerial, PPPOS_APN)) {
-    Serial.println("PPPoS init failed!");
-    return;
+#if ENABLE_PPPOS
+if (pppos.init(&SerialAT, PPPOS_APN)) {
+  if (pppos.connect(PPPOS_CONNECT_TIMEOUT_MS)) {
+    Serial.println("✓ PPPoS connected!");
+    Serial.println("✓ IP: " + pppos.getLocalIP());
   }
-
-  // Connect to cellular network via PPP
-  if (!pppos.connect(PPPOS_CONNECT_TIMEOUT_MS)) {
-    Serial.println("PPPoS connection failed!");
-    return;
-  }
-
-  Serial.println("PPPoS connected!");
-  Serial.println("IP: " + pppos.getLocalIP());
-
-  // Now you can use standard networking libraries
-  // Example: MQTT, HTTP, etc.
 }
-
-void loop() {
-  // CRITICAL: Feed serial data to PPP stack
-  pppos.loop();
-
-  // Your application code here
-  delay(10);
-}
+#endif
 ```
 
-### 4. Integration with MQTT
+**In loop():**
+```cpp
+#if ENABLE_PPPOS
+pppos.loop();  // CRITICAL: Feeds serial data to PPP stack
+#endif
+```
 
-Once PPPoS is connected, you can use standard MQTT libraries:
+**No additional code needed!** Just set `ENABLE_PPPOS 1` in `Config.h` and flash the firmware.
+
+### 4. Using Standard Libraries with PPPoS
+
+Once PPPoS is connected, you have a full TCP/IP stack and can use **any standard Arduino networking library**:
+
+#### Option A: Keep Using ModemMQTT (Current - AT Commands)
+The existing code continues to work. ModemMQTT uses AT commands and doesn't require PPPoS.
+
+#### Option B: Switch to Standard MQTT Library (Future Enhancement)
+You can replace `ModemMQTT` with `PubSubClient` to use MQTT over the PPP connection:
 
 ```cpp
 #include <PubSubClient.h>
@@ -139,28 +134,25 @@ WiFiClient espClient;
 PubSubClient mqtt(espClient);
 
 void setup() {
-  // ... PPPoS setup code ...
-
+  // After PPPoS connects...
   if (pppos.isConnected()) {
-    // Configure MQTT
     mqtt.setServer(MQTT_BROKER, MQTT_PORT);
     mqtt.setCallback(mqttCallback);
-
-    // Connect to MQTT broker
-    if (mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS)) {
-      Serial.println("MQTT connected!");
-      mqtt.subscribe(MQTT_TOPIC_COMMANDS);
-    }
+    mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS);
   }
 }
 
 void loop() {
   pppos.loop();  // CRITICAL!
   mqtt.loop();
-
-  // Your code here
 }
 ```
+
+**Benefits of switching:**
+- More reliable MQTT connection
+- Better error handling
+- Larger message support
+- Standard Arduino library ecosystem
 
 ## PPP Connection Sequence
 
@@ -376,21 +368,57 @@ void loop() {
 ## Files in This Implementation
 
 ```
-IrrigationController/
-├── PPPoSManager.h              # PPPoS manager header
-├── PPPoSManager.cpp            # PPPoS manager implementation
-├── Config.h                    # Updated with PPPoS settings
-└── examples/
-    └── PPPoS_Example.ino       # Simple example (modem initialization + dial)
+Irrigation_Main_Controller/
+├── IrrigationController/
+│   ├── IrrigationController.ino  # Main controller (PPPoS integrated!)
+│   ├── PPPoSManager.h            # PPPoS manager header
+│   ├── PPPoSManager.cpp          # PPPoS manager implementation
+│   └── Config.h                  # Updated with PPPoS settings (ENABLE_PPPOS)
+└── PPPoS_IMPLEMENTATION_GUIDE.md # This guide
 ```
 
-## Next Steps
+## How to Use
 
-1. **Test the Basic Example**: Start with `examples/PPPoS_Example.ino` to verify modem can dial PPP
-2. **Add PPPoS to Main Code**: Integrate `PPPoSManager` into `IrrigationController.ino`
-3. **Switch to Standard MQTT**: Replace `ModemMQTT` with `PubSubClient`
-4. **Update Config**: Enable `ENABLE_PPPOS` in `Config.h`
-5. **Test Connectivity**: Verify MQTT and other services work over PPP
+### Quick Start (PPPoS Already Integrated!)
+
+1. **Enable PPPoS** in `Config.h`:
+   ```cpp
+   #define ENABLE_PPPOS 1  // Enable PPP mode
+   ```
+
+2. **Set your APN** (already configured for Airtel):
+   ```cpp
+   #define PPPOS_APN "airtelgprs.com"
+   ```
+
+3. **Flash the firmware** to your ESP32
+
+4. **Monitor serial output**:
+   ```
+   [7/9] Modem...
+         ✓ Modem initialized via SMS
+         → Configuring PPPoS (PPP over Serial)...
+         ✓ PPPoS initialized
+         → Connecting to cellular network via PPP...
+         ✓ PPPoS connected!
+         ✓ IP: 10.xxx.xxx.xxx
+
+   ========================================
+   ✓ SETUP COMPLETE
+   ========================================
+   PPPoS:   CONNECTED (10.xxx.xxx.xxx)
+   ```
+
+5. **Done!** ESP32 now has internet via cellular PPP
+
+### Advanced: Switch to Standard MQTT
+
+If you want to use `PubSubClient` instead of `ModemMQTT`:
+
+1. Disable AT command MQTT: `#define ENABLE_MQTT 0` in `Config.h`
+2. Add `PubSubClient` library
+3. Initialize MQTT client after PPPoS connects in `setup()`
+4. Call `mqtt.loop()` in main `loop()`
 
 ## References
 

@@ -15,6 +15,7 @@
 #include "ScheduleManager.h"
 #include "NodeCommunication.h"  // NEW: Node communication module
 #include "UserCommunication.h"  // NEW: User communication module
+#include "PPPoSManager.h"       // PPPoS cellular data module
 
 // ========== Global Variable Definitions ==========
 SystemConfig sysConfig;
@@ -48,6 +49,7 @@ HTTPComm httpComm;            // HTTP API instance
 ScheduleManager scheduleMgr;
 NodeCommunication nodeComm;   // NEW: Node communication module
 UserCommunication userComm;   // NEW: User communication module
+PPPoSManager pppos;           // NEW: PPPoS cellular data module
 
 TwoWire WireRTC = TwoWire(1);
 RTC_DS3231 rtc;
@@ -170,9 +172,29 @@ void setup() {
     }
     #endif
 
-    // Configure WiFi Hotspot (if enabled)
-    // This turns the modem into a WiFi access point
-    #if ENABLE_MODEM_HOTSPOT
+    // Configure PPPoS OR WiFi Hotspot (mutually exclusive)
+    #if ENABLE_PPPOS
+    // PPPoS mode - ESP32 gets internet via PPP over modem's serial port
+    Serial.println("      → Configuring PPPoS (PPP over Serial)...");
+    if (pppos.init(&SerialAT, PPPOS_APN)) {
+      Serial.println("      ✓ PPPoS initialized");
+
+      Serial.println("      → Connecting to cellular network via PPP...");
+      if (pppos.connect(PPPOS_CONNECT_TIMEOUT_MS)) {
+        Serial.println("      ✓ PPPoS connected!");
+        Serial.println("      ✓ IP: " + pppos.getLocalIP());
+
+        // Note: You can now use standard MQTT/HTTP libraries
+        // Example: PubSubClient for MQTT instead of ModemMQTT
+      } else {
+        Serial.println("      ❌ PPPoS connection failed");
+        Serial.println("      ℹ Check: SIM card, network registration, APN");
+      }
+    } else {
+      Serial.println("      ❌ PPPoS initialization failed");
+    }
+    #elif ENABLE_MODEM_HOTSPOT
+    // WiFi Hotspot mode - modem becomes a WiFi access point
     Serial.println("      → Configuring modem WiFi hotspot...");
     #if ENABLE_MQTT
     if (mqtt.configureHotspot(MODEM_HOTSPOT_SSID, MODEM_HOTSPOT_PASS)) {
@@ -307,6 +329,9 @@ void setup() {
   Serial.println("✓ SETUP COMPLETE");
   Serial.println("========================================");
   Serial.println("LoRa:    " + String(loraInitialized ? "OK" : "FAILED"));
+  #if ENABLE_PPPOS
+  Serial.println("PPPoS:   " + String(pppos.isConnected() ? "CONNECTED (" + pppos.getLocalIP() + ")" : "DISCONNECTED"));
+  #endif
   #if ENABLE_MQTT
   Serial.println("MQTT:    " + String(mqtt.isConnected() ? "CONNECTED" : "DISCONNECTED"));
   Serial.println("SMS:     DISABLED (MQTT mode)");
@@ -357,6 +382,11 @@ unsigned long lastSMSCheck = 0;
 unsigned long lastHeartbeat = 0;  // For debug heartbeat
 
 void loop() {
+  // Feed PPPoS stack (CRITICAL if using PPPoS for cellular data)
+  #if ENABLE_PPPOS
+  pppos.loop();  // Must be called frequently to feed serial data to PPP stack
+  #endif
+
   // Debug heartbeat - print every 30 seconds to confirm loop is running
   if (millis() - lastHeartbeat > 30000) {
     lastHeartbeat = millis();
@@ -364,6 +394,10 @@ void loop() {
     #if ENABLE_SMS
     Serial.println("[Loop] SMS Status: Ready=" + String(sms.isReady() ? "YES" : "NO") +
                    ", Queued=" + String(sms.getUnreadCount()));
+    #endif
+    #if ENABLE_PPPOS
+    Serial.println("[Loop] PPPoS Status: Connected=" + String(pppos.isConnected() ? "YES" : "NO") +
+                   ", IP=" + pppos.getLocalIP());
     #endif
   }
 
