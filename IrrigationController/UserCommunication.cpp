@@ -7,7 +7,7 @@ extern bool loraInitialized;
 
 UserCommunication::UserCommunication() : smsComm(nullptr), bleComm(nullptr), loraComm(nullptr), mqttComm(nullptr), wifiComm(nullptr), httpComm(nullptr), nodeCommandCallback(nullptr) {}
 
-void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, WiFiComm* wifi, HTTPComm* http, const String &adminPhoneNum) {
+void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, MQTTComm* mqtt, WiFiComm* wifi, HTTPComm* http, const String &adminPhoneNum) {
   smsComm = sms;
   bleComm = ble;
   loraComm = lora;
