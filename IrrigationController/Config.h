@@ -138,6 +138,14 @@
 #define MODEM_APN "airtelgprs.com"
 #define DEFAULT_SIM_APN MODEM_APN
 
+// ========== PPPoS Settings ==========
+// Enable PPPoS (PPP over Serial) for cellular data connection
+// When enabled, ESP32 gets IP address through modem via PPP protocol
+// This allows using standard MQTT/HTTP libraries instead of AT commands
+#define ENABLE_PPPOS 1                // Enable PPPoS mode (1 = PPP, 0 = AT command mode)
+#define PPPOS_APN MODEM_APN           // APN for PPP connection
+#define PPPOS_CONNECT_TIMEOUT_MS 30000 // PPP connection timeout (30 seconds)
+
 // ========== SMS Settings ==========
 #define SMS_ALERT_PHONE_1 "+919944272647"
 #define SMS_ALERT_PHONE_2 ""  // Leave empty if not used (was invalid: +0987654321)
