@@ -421,9 +421,19 @@ void UserCommunication::processBLECommand(int nodeId, const String &command) {
       response = "FAIL|Node " + String(nodeId) + " timeout";
     }
 
-    sendBLENotification(response);
+    // Send response directly via BLE
+    #if ENABLE_BLE
+    if (bleComm != nullptr && bleComm->isConnected()) {
+      bleComm->notify(response);
+    }
+    #endif
   } else {
-    sendBLENotification("ERROR|Node commands not available");
+    // Send error directly via BLE
+    #if ENABLE_BLE
+    if (bleComm != nullptr && bleComm->isConnected()) {
+      bleComm->notify("ERROR|Node commands not available");
+    }
+    #endif
     Serial.println("[UserComm:BLE] ⚠ No node command callback set");
   }
 }
