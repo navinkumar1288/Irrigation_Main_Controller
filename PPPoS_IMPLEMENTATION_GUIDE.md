@@ -116,43 +116,35 @@ pppos.loop();  // CRITICAL: Feeds serial data to PPP stack
 
 **No additional code needed!** Just set `ENABLE_PPPOS 1` in `Config.h` and flash the firmware.
 
-### 4. Using Standard Libraries with PPPoS
+### 4. MQTT Over PPPoS/WiFi (Already Implemented!)
 
-Once PPPoS is connected, you have a full TCP/IP stack and can use **any standard Arduino networking library**:
-
-#### Option A: Keep Using ModemMQTT (Current - AT Commands)
-The existing code continues to work. ModemMQTT uses AT commands and doesn't require PPPoS.
-
-#### Option B: Switch to Standard MQTT Library (Future Enhancement)
-You can replace `ModemMQTT` with `PubSubClient` to use MQTT over the PPP connection:
+The controller now uses **MQTTComm** - a native ESP32 MQTT module that works over both PPPoS and WiFi:
 
 ```cpp
-#include <PubSubClient.h>
-#include <WiFiClient.h>  // Works with PPP too!
+#include <MQTTComm.h>
 
-WiFiClient espClient;
-PubSubClient mqtt(espClient);
+MQTTComm mqtt;
 
 void setup() {
-  // After PPPoS connects...
-  if (pppos.isConnected()) {
-    mqtt.setServer(MQTT_BROKER, MQTT_PORT);
-    mqtt.setCallback(mqttCallback);
-    mqtt.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS);
-  }
+  // After PPPoS or WiFi connects...
+  mqtt.init();
+  mqtt.configure();
+  mqtt.subscribe(MQTT_TOPIC_COMMANDS);
 }
 
 void loop() {
-  pppos.loop();  // CRITICAL!
-  mqtt.loop();
+  pppos.loop();  // CRITICAL for PPPoS!
+  mqtt.processBackground();  // Handles auto-reconnection
 }
 ```
 
-**Benefits of switching:**
-- More reliable MQTT connection
-- Better error handling
-- Larger message support
-- Standard Arduino library ecosystem
+**Features:**
+- ✅ Works over PPPoS (cellular data via PPP)
+- ✅ Works over WiFi (direct or hotspot)
+- ✅ Uses standard PubSubClient library
+- ✅ Automatic reconnection with throttling
+- ✅ Detailed error state reporting
+- ✅ Same API as old ModemMQTT (drop-in replacement)
 
 ## PPP Connection Sequence
 
@@ -411,14 +403,28 @@ Irrigation_Main_Controller/
 
 5. **Done!** ESP32 now has internet via cellular PPP
 
-### Advanced: Switch to Standard MQTT
+### MQTT Configuration
 
-If you want to use `PubSubClient` instead of `ModemMQTT`:
+MQTT is automatically configured based on available network connectivity:
 
-1. Disable AT command MQTT: `#define ENABLE_MQTT 0` in `Config.h`
-2. Add `PubSubClient` library
-3. Initialize MQTT client after PPPoS connects in `setup()`
-4. Call `mqtt.loop()` in main `loop()`
+**With PPPoS enabled:**
+```cpp
+#define ENABLE_PPPOS 1  // PPP mode
+#define ENABLE_MQTT 1   // MQTT enabled
+```
+→ MQTT uses PPPoS connection (cellular data)
+
+**With WiFi only:**
+```cpp
+#define ENABLE_PPPOS 0  // PPP disabled
+#define ENABLE_MQTT 1   // MQTT enabled
+#define ENABLE_WIFI 1   // WiFi enabled
+```
+→ MQTT uses WiFi connection
+
+**MQTT is disabled when:**
+- No network connectivity (neither PPPoS nor WiFi)
+- `ENABLE_MQTT 0` in Config.h
 
 ## References
 
