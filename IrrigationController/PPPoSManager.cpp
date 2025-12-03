@@ -76,18 +76,37 @@ bool PPPoSManager::connect(uint32_t timeout_ms) {
   Serial.println("[PPPoS] Starting PPP connection...");
   state = PPP_CONFIGURING;
 
-  // Step 1: Configure PDP context
-  Serial.println("[PPPoS] → Setting PDP context...");
-  String pdpCmd = "AT+CGDCONT=1,\"IP\",\"" + apn + "\"";
+  // Step 1: Check if PDP context is already configured
+  Serial.println("[PPPoS] → Checking PDP context configuration...");
+  clearSerialBuffer();
+  modemSerial->println("AT+CGDCONT?");
+  String response = readModemResponse(2000);
 
-  if (!sendATCommand(pdpCmd, 2000)) {
-    Serial.println("[PPPoS] ❌ PDP context configuration failed");
-    state = PPP_ERROR;
-    return false;
+  bool needsConfig = true;
+  if (response.indexOf("+CGDCONT: 1") >= 0) {
+    // Context 1 exists, check if it has the correct APN
+    if (response.indexOf(apn) >= 0) {
+      Serial.println("[PPPoS] ✓ PDP context already configured with correct APN");
+      needsConfig = false;
+    } else {
+      Serial.println("[PPPoS] ⚠ PDP context exists but with different APN, will reconfigure");
+    }
+  }
+
+  // Step 2: Configure PDP context if needed
+  if (needsConfig) {
+    Serial.println("[PPPoS] → Setting PDP context...");
+    String pdpCmd = "AT+CGDCONT=1,\"IP\",\"" + apn + "\"";
+
+    if (!sendATCommand(pdpCmd, 2000)) {
+      Serial.println("[PPPoS] ❌ PDP context configuration failed");
+      state = PPP_ERROR;
+      return false;
+    }
   }
   delay(500);
 
-  // Step 2: Dial PPP connection
+  // Step 3: Dial PPP connection
   Serial.println("[PPPoS] → Dialing PPP (ATD*99#)...");
   state = PPP_DIALING;
 
@@ -131,7 +150,7 @@ bool PPPoSManager::connect(uint32_t timeout_ms) {
   // Small delay after CONNECT
   delay(100);
 
-  // Step 3: Create PPP netif
+  // Step 4: Create PPP netif
   esp_netif_config_t netif_ppp_config = ESP_NETIF_DEFAULT_PPP();
   ppp_netif = esp_netif_new(&netif_ppp_config);
 
