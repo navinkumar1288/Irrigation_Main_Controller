@@ -9,7 +9,7 @@
 #include "ModemSMS.h"
 #include "BLEComm.h"
 #include "LoRaComm.h"
-#include "ModemMQTT.h"
+#include "MQTTComm.h"
 #include "WiFiComm.h"
 #include "HTTPComm.h"
 
@@ -33,7 +33,7 @@ private:
   ModemSMS* smsComm;
   BLEComm* bleComm;
   LoRaComm* loraComm;
-  ModemMQTT* mqttComm;
+  MQTTComm* mqttComm;
   WiFiComm* wifiComm;
   HTTPComm* httpComm;
   NodeCommandCallback nodeCommandCallback;
@@ -58,7 +58,7 @@ public:
   UserCommunication();
 
   // Initialize with module pointers (NO NodeCommunication - uses callback instead)
-  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, ModemMQTT* mqtt, WiFiComm* wifi, HTTPComm* http, const String &adminPhoneNum);
+  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, MQTTComm* mqtt, WiFiComm* wifi, HTTPComm* http, const String &adminPhoneNum);
 
   // Set callback for node commands (business logic in .ino file)
   void setNodeCommandCallback(NodeCommandCallback callback);
