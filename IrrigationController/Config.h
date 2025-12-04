@@ -133,7 +133,7 @@
 #define MQTT_CLIENT_ID "irrigation_controller_001"
 #define MQTT_USER "navin"
 #define MQTT_PASS "HaiNavin33"
-// Using ESP-IDF MQTT client with MQTT v5 protocol support
+// Using ESP-IDF MQTT client with MQTT v5 (enabled via sdkconfig.defaults)
 
 #define MQTT_TOPIC_STATUS "irrigation/status"
 #define MQTT_TOPIC_COMMANDS "irrigation/commands"

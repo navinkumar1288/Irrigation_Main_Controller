@@ -43,7 +43,7 @@ bool MQTTComm::init() {
   mqtt_cfg.credentials.username = MQTT_USER;
   mqtt_cfg.credentials.authentication.password = MQTT_PASS;
   mqtt_cfg.credentials.client_id = MQTT_CLIENT_ID;
-  mqtt_cfg.session.protocol_ver = MQTT_PROTOCOL_V_5;  // Enable MQTT v5
+  mqtt_cfg.session.protocol_ver = MQTT_PROTOCOL_V_5;  // MQTT v5 (enabled via sdkconfig.defaults)
   mqtt_cfg.network.timeout_ms = 10000;
   mqtt_cfg.session.keepalive = 120;
   mqtt_cfg.buffer.size = 2048;
@@ -80,6 +80,7 @@ bool MQTTComm::init() {
   Serial.println("[MQTT] Broker: " + String(MQTT_BROKER) + ":" + String(MQTT_PORT));
   Serial.println("[MQTT] Protocol: MQTT v5 over TLS/SSL");
   Serial.println("[MQTT] Client ID: " + String(MQTT_CLIENT_ID));
+  Serial.println("[MQTT] Note: MQTT v5 enabled via sdkconfig.defaults");
 
   return true;
 }
