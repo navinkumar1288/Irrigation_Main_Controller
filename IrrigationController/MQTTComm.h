@@ -19,6 +19,7 @@ private:
   unsigned long lastReconnectAttempt;
   unsigned long reconnectInterval;
   MQTTMessageCallback messageCallback;
+  String brokerUri;  // Store URI string to keep it in scope
 
   // Static event handler (required by ESP-IDF MQTT)
   static void mqttEventHandler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);

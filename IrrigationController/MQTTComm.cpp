@@ -1,5 +1,6 @@
 // MQTTComm.cpp - MQTT v3.1.1 communication using ESP-IDF native MQTT client
 #include "MQTTComm.h"
+#include <WiFi.h>
 
 // Static instance pointer for event handler
 static MQTTComm *mqttInstance = nullptr;
@@ -29,17 +30,17 @@ MQTTComm::~MQTTComm() {
 bool MQTTComm::init() {
   Serial.println("[MQTT] Initializing MQTT v3.1.1 client...");
 
-  // Build MQTT broker URI
-  String uri = "mqtts://";  // Use mqtts:// for SSL/TLS
-  uri += MQTT_BROKER;
-  uri += ":";
-  uri += String(MQTT_PORT);
+  // Build MQTT broker URI (store in member variable to keep it in scope)
+  brokerUri = "mqtts://";  // Use mqtts:// for SSL/TLS
+  brokerUri += MQTT_BROKER;
+  brokerUri += ":";
+  brokerUri += String(MQTT_PORT);
 
-  Serial.println("[MQTT] Broker URI: " + uri);
+  Serial.println("[MQTT] Broker URI: " + brokerUri);
 
   // Configure MQTT client
   esp_mqtt_client_config_t mqtt_cfg = {};
-  mqtt_cfg.broker.address.uri = uri.c_str();
+  mqtt_cfg.broker.address.uri = brokerUri.c_str();
   mqtt_cfg.credentials.username = MQTT_USER;
   mqtt_cfg.credentials.authentication.password = MQTT_PASS;
   mqtt_cfg.credentials.client_id = MQTT_CLIENT_ID;
@@ -91,6 +92,14 @@ bool MQTTComm::configure() {
   if (mqttClient == nullptr) {
     Serial.println("[MQTT] ❌ Client not initialized");
     return false;
+  }
+
+  // Check network connectivity before starting MQTT
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[MQTT] ⚠ Warning: WiFi not connected - relying on PPPoS");
+    // Note: If using PPPoS, this is expected and OK
+  } else {
+    Serial.println("[MQTT] ✓ WiFi connected: " + WiFi.localIP().toString());
   }
 
   esp_err_t err = esp_mqtt_client_start(mqttClient);
