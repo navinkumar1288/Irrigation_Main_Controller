@@ -1,6 +1,6 @@
-// MQTTComm.h - MQTT v5 communication using ESP-IDF native MQTT client
+// MQTTComm.h - MQTT v3.1.1 communication using ESP-IDF native MQTT client
 // Works with both PPPoS (cellular) and WiFi connections
-// Supports TLS/SSL and MQTT v5 protocol (enabled via sdkconfig.defaults)
+// Supports TLS/SSL and MQTT v3.1.1 protocol (enabled by default in Arduino ESP32)
 #ifndef MQTT_COMM_H
 #define MQTT_COMM_H
 

@@ -126,14 +126,14 @@
 #define NTP_TIMEZONE_OFFSET 0
 
 // ========== MQTT Settings ==========
-// EMQX Cloud Broker - MQTT v5 over TLS/SSL
-#define MQTT_BROKER "sdbc1da0.ala.asia-southeast1.emqxsl.com"
+// HiveMQ Cloud Broker - MQTT v3.1.1 over TLS/SSL
+#define MQTT_BROKER "39aff691b9b5421ab98adc2addedbd83.s1.eu.hivemq.cloud"
 #define MQTT_PORT 8883                // MQTT over TLS/SSL port
 #define MQTT_USE_SSL 1                // Enable TLS/SSL encryption
 #define MQTT_CLIENT_ID "irrigation_controller_001"
-#define MQTT_USER "navin"
-#define MQTT_PASS "HaiNavin33"
-// Using ESP-IDF MQTT client with MQTT v5 (enabled via sdkconfig.defaults)
+#define MQTT_USER "sekaranfarm"
+#define MQTT_PASS "Welcome123"
+// Using ESP-IDF MQTT client with MQTT v3.1.1 (enabled by default in Arduino ESP32)
 
 #define MQTT_TOPIC_STATUS "irrigation/status"
 #define MQTT_TOPIC_COMMANDS "irrigation/commands"
