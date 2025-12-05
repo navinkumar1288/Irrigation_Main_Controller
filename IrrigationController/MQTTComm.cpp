@@ -1,4 +1,4 @@
-// MQTTComm.cpp - MQTT v5 communication using ESP-IDF native MQTT client
+// MQTTComm.cpp - MQTT v3.1.1 communication using ESP-IDF native MQTT client
 #include "MQTTComm.h"
 
 // Static instance pointer for event handler
@@ -27,7 +27,7 @@ MQTTComm::~MQTTComm() {
 }
 
 bool MQTTComm::init() {
-  Serial.println("[MQTT] Initializing MQTT v5 client...");
+  Serial.println("[MQTT] Initializing MQTT v3.1.1 client...");
 
   // Build MQTT broker URI
   String uri = "mqtts://";  // Use mqtts:// for SSL/TLS
@@ -43,7 +43,7 @@ bool MQTTComm::init() {
   mqtt_cfg.credentials.username = MQTT_USER;
   mqtt_cfg.credentials.authentication.password = MQTT_PASS;
   mqtt_cfg.credentials.client_id = MQTT_CLIENT_ID;
-  mqtt_cfg.session.protocol_ver = MQTT_PROTOCOL_V_5;  // MQTT v5 (enabled via sdkconfig.defaults)
+  mqtt_cfg.session.protocol_ver = MQTT_PROTOCOL_V_3_1_1;  // MQTT v3.1.1 (enabled by default)
   mqtt_cfg.network.timeout_ms = 10000;
   mqtt_cfg.session.keepalive = 120;
   mqtt_cfg.buffer.size = 2048;
@@ -76,11 +76,11 @@ bool MQTTComm::init() {
   // Register event handler
   esp_mqtt_client_register_event(mqttClient, MQTT_EVENT_ANY, mqttEventHandler, this);
 
-  Serial.println("[MQTT] ✓ MQTT v5 client initialized");
+  Serial.println("[MQTT] ✓ MQTT v3.1.1 client initialized");
   Serial.println("[MQTT] Broker: " + String(MQTT_BROKER) + ":" + String(MQTT_PORT));
-  Serial.println("[MQTT] Protocol: MQTT v5 over TLS/SSL");
+  Serial.println("[MQTT] Protocol: MQTT v3.1.1 over TLS/SSL");
   Serial.println("[MQTT] Client ID: " + String(MQTT_CLIENT_ID));
-  Serial.println("[MQTT] Note: MQTT v5 enabled via sdkconfig.defaults");
+  Serial.println("[MQTT] Note: Using HiveMQ Cloud with MQTT v3.1.1");
 
   return true;
 }
