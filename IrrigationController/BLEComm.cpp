@@ -5,26 +5,25 @@
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) override {
     bleComm.setConnected(true);
-    Serial.println("[BLE] Client connected");
+    Serial.println("[BLE] ✓ Client connected");
 
     // Stop advertising when connected (reduce BLE overhead)
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     if (pAdvertising) {
       pAdvertising->stop();
+      Serial.println("[BLE] → Advertising stopped (client connected)");
     }
 
-    // Note: MTU negotiation happens automatically - no manual intervention needed
     Serial.println("[BLE] Connection established, MTU negotiation in progress");
   }
 
   void onDisconnect(BLEServer* pServer) override {
     bleComm.setConnected(false);
-    Serial.println("[BLE] Client disconnected");
+    Serial.println("[BLE] ⚠ Client disconnected");
 
-    // Small delay before restarting advertising to prevent rapid reconnect issues
     delay(500);
     BLEDevice::startAdvertising();
-    Serial.println("[BLE] Advertising restarted");
+    Serial.println("[BLE] → Advertising restarted");
   }
 };
 
@@ -35,9 +34,12 @@ class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
     String payload = String(value.c_str());
     payload.trim();
     
-    Serial.println("[BLE] RX: " + payload);
+    if (payload.length() == 0) {
+      Serial.println("[BLE] ⚠ Empty payload received");
+      return;
+    }
     
-    if (payload.length() == 0) return;
+    Serial.println("[BLE] RX: " + payload);
     
     String response = "";
     
@@ -51,18 +53,19 @@ class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
       cmd.trim();
       
       if (node > 0 && node <= 255 && cmd.length() > 0) {
-        Serial.printf("[BLE] Command for Node %d: %s\n", node, cmd.c_str());
+        Serial.printf("[BLE] → Command for Node %d: %s\n", node, cmd.c_str());
         
         // Use callback instead of direct LoRa access
         if (bleComm.commandCallback != nullptr) {
           bleComm.commandCallback(node, cmd);
           response = "OK|Command sent to node " + String(node);
         } else {
-          response = "ERROR|No command handler";
+          response = "ERROR|No command handler registered";
+          Serial.println("[BLE] ❌ Command callback not set!");
         }
       } else {
         response = "ERROR|Invalid format. Use: <node> <command>";
-        Serial.println("[BLE] Invalid command format");
+        Serial.printf("[BLE] ❌ Invalid command format: node=%d, cmd=%s\n", node, cmd.c_str());
       }
     }
     // It's a schedule or other message - queue it
@@ -71,14 +74,20 @@ class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
         payload += ",SRC=BT";
       }
       
-      incomingQueue.enqueue(payload);
-      response = "QUEUED|Message queued for processing";
-      Serial.println("[BLE] Message queued");
+      if (incomingQueue.enqueue(payload)) {
+        response = "QUEUED|Message queued for processing";
+        Serial.println("[BLE] → Message queued");
+      } else {
+        response = "ERROR|Queue full";
+        Serial.println("[BLE] ❌ Message queue full!");
+      }
     }
     
     // Send response
     if (response.length() > 0 && bleComm.isConnected()) {
-      bleComm.notify(response);
+      if (!bleComm.notify(response)) {
+        Serial.println("[BLE] ❌ Failed to send response");
+      }
     }
   }
 };
@@ -86,102 +95,161 @@ class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
 BLEComm::BLEComm() : server(nullptr), txChar(nullptr), rxChar(nullptr), connected(false), commandCallback(nullptr) {}
 
 bool BLEComm::init() {
-  Serial.println("[BLE] Initializing...");
+  Serial.println("[BLE] ========== Initializing BLE ==========");
 
-  // Initialize BLE with device name from Config.h
-  BLEDevice::init(BLE_DEVICE_NAME);
+  try {
+    Serial.printf("[BLE] Device name: %s\n", BLE_DEVICE_NAME);
+    BLEDevice::init(BLE_DEVICE_NAME);
+    Serial.println("[BLE] ✓ BLE device initialized");
 
-  server = BLEDevice::createServer();
-  if (!server) {
-    Serial.println("❌ BLE server creation failed");
-    return false;
-  }
+    server = BLEDevice::createServer();
+    if (!server) {
+      Serial.println("[BLE] ❌ BLE server creation failed");
+      return false;
+    }
+    Serial.println("[BLE] ✓ BLE server created");
 
-  server->setCallbacks(new MyServerCallbacks());
+    server->setCallbacks(new MyServerCallbacks());
+    Serial.println("[BLE] ✓ Server callbacks configured");
 
-  // NOTE: MTU negotiation happens automatically during connection.
-  // Do NOT call BLEDevice::setMTU() here - it forces MTU requirements
-  // that many clients cannot meet, causing connection failures.
+    Serial.printf("[BLE] Creating service with UUID: %s\n", SERVICE_UUID);
+    BLEService *pService = server->createService(SERVICE_UUID);
+    if (!pService) {
+      Serial.println("[BLE] ❌ BLE service creation failed - check UUID format");
+      return false;
+    }
+    Serial.println("[BLE] ✓ Service created successfully");
 
-  BLEService *pService = server->createService(SERVICE_UUID);
-  if (!pService) {
-    Serial.println("❌ BLE service creation failed");
-    return false;
-  }
+    // Create RX characteristic (FROM client TO device)
+    Serial.printf("[BLE] Creating RX characteristic (UUID: %s)\n", CHARACTERISTIC_UUID_RX);
+    rxChar = pService->createCharacteristic(
+      CHARACTERISTIC_UUID_RX,
+      BLECharacteristic::PROPERTY_WRITE |
+      BLECharacteristic::PROPERTY_WRITE_NR |
+      BLECharacteristic::PROPERTY_READ
+    );
 
-  txChar = pService->createCharacteristic(
-    CHARACTERISTIC_UUID_TX,
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-
-  if (txChar) {
-    txChar->addDescriptor(new BLE2902());
-    txChar->setValue("OK");
-  } else {
-    Serial.println("⚠ TX characteristic creation failed");
-  }
-
-  rxChar = pService->createCharacteristic(
-    CHARACTERISTIC_UUID_RX,
-    BLECharacteristic::PROPERTY_WRITE
-  );
-
-  if (rxChar) {
+    if (!rxChar) {
+      Serial.println("[BLE] ❌ RX characteristic creation failed");
+      return false;
+    }
+    Serial.println("[BLE] ✓ RX characteristic created with WRITE/READ properties");
     rxChar->setCallbacks(new MyCharacteristicCallbacks());
-  } else {
-    Serial.println("⚠ RX characteristic creation failed");
+
+    // Create TX characteristic (FROM device TO client)
+    Serial.printf("[BLE] Creating TX characteristic (UUID: %s)\n", CHARACTERISTIC_UUID_TX);
+    txChar = pService->createCharacteristic(
+      CHARACTERISTIC_UUID_TX,
+      BLECharacteristic::PROPERTY_NOTIFY |
+      BLECharacteristic::PROPERTY_READ
+    );
+
+    if (!txChar) {
+      Serial.println("[BLE] ❌ TX characteristic creation failed");
+      return false;
+    }
+    Serial.println("[BLE] ✓ TX characteristic created with NOTIFY/READ properties");
+    
+    // Add CCCD descriptor for notifications
+    txChar->addDescriptor(new BLE2902());
+    Serial.println("[BLE] ✓ CCCD descriptor added to TX characteristic");
+    
+    // Initialize TX characteristic with a default value
+    txChar->setValue("READY");
+    Serial.println("[BLE] ✓ TX characteristic initialized");
+
+    // Start service - FIXED: pService->start() returns void, not bool
+    pService->start();
+    Serial.println("[BLE] ✓ Service started");
+
+    // Configure advertising with proper connection parameters
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    if (!pAdvertising) {
+      Serial.println("[BLE] ❌ Failed to get advertising object");
+      return false;
+    }
+
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+
+    // Set connection interval preferences (in units of 1.25ms)
+    pAdvertising->setMinPreferred(0x10);  // 20ms minimum
+    pAdvertising->setMaxPreferred(0x20);  // 40ms maximum
+    Serial.println("[BLE] ✓ Connection interval preferences set: 20-40ms");
+
+    // Configure advertisement data
+    BLEAdvertisementData advData;
+    advData.setName(BLE_DEVICE_NAME);
+    advData.setFlags(0x06);
+
+    String mfr = String("\x01\x02\x03\x04");
+    advData.setManufacturerData(mfr);
+    Serial.println("[BLE] ✓ Advertisement data configured");
+
+    pAdvertising->setAdvertisementData(advData);
+
+    // Configure scan response
+    BLEAdvertisementData scanResp;
+    scanResp.setName(BLE_DEVICE_NAME);
+    pAdvertising->setScanResponseData(scanResp);
+    Serial.println("[BLE] ✓ Scan response configured");
+
+    // Start advertising
+    BLEDevice::startAdvertising();
+    Serial.println("[BLE] ✓ Advertising started");
+
+    Serial.println("[BLE] ========== BLE INITIALIZATION SUCCESS ==========");
+    Serial.println("[BLE] Device: " + String(BLE_DEVICE_NAME));
+    Serial.println("[BLE] Service UUID: " + String(SERVICE_UUID));
+    Serial.println("[BLE] Status: Ready for connections");
+    
+    return true;
+
+  } catch (...) {
+    Serial.println("[BLE] ❌ Exception during BLE initialization");
+    return false;
   }
-
-  pService->start();
-
-  // Configure advertising with proper connection parameters
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-
-  // CRITICAL: Set to 0x00 (no preference) to let client choose intervals
-  // Forcing specific intervals causes many clients to reject the connection
-  pAdvertising->setMinPreferred(0x00);  // No minimum preference - compatible with all clients
-
-  BLEAdvertisementData advData;
-  advData.setName(BLE_DEVICE_NAME);
-  advData.setFlags(0x06);  // General discoverable, BR/EDR not supported
-
-  // Add manufacturer data (improves device recognition on some clients)
-  String mfr = String("\x01\x02\x03\x04");
-  advData.setManufacturerData(mfr);
-
-  pAdvertising->setAdvertisementData(advData);
-
-  BLEAdvertisementData scanResp;
-  scanResp.setName(BLE_DEVICE_NAME);
-  pAdvertising->setScanResponseData(scanResp);
-
-  BLEDevice::startAdvertising();
-
-  Serial.println("✓ BLE initialized, advertising as: " + String(BLE_DEVICE_NAME));
-  Serial.println("  MTU: Auto-negotiated during connection");
-  Serial.println("  Connection interval: No preference (client decides)");
-  return true;
 }
 
 bool BLEComm::notify(const String &msg) {
-  if (!connected || !txChar) {
+  if (!connected) {
+    Serial.println("[BLE] ❌ Cannot notify - client not connected");
     return false;
   }
-  
+
+  if (!txChar) {
+    Serial.println("[BLE] ❌ Cannot notify - txChar is null");
+    return false;
+  }
+
+  if (msg.length() == 0) {
+    Serial.println("[BLE] ⚠ Attempt to send empty message");
+    return false;
+  }
+
   String m = msg;
+  
+  // Log if truncation occurs
   if (m.length() > 200) {
+    Serial.printf("[BLE] ⚠ Message truncated from %d to 200 bytes\n", m.length());
     m = m.substring(0, 200);
   }
-  
-  txChar->setValue((uint8_t*)m.c_str(), m.length());
-  txChar->notify();
-  
-  Serial.println("[BLE] TX: " + m);
-  delay(10);
-  
-  return true;
+
+  try {
+    txChar->setValue((uint8_t*)m.c_str(), m.length());
+    
+    // FIXED: notify() returns void, not bool
+    // Just call it without checking return value
+    txChar->notify();
+    
+    Serial.println("[BLE] TX: " + m);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    return true;
+    
+  } catch (...) {
+    Serial.println("[BLE] ❌ Exception during notify");
+    return false;
+  }
 }
 
 bool BLEComm::isConnected() {
@@ -194,4 +262,19 @@ void BLEComm::setConnected(bool state) {
 
 void BLEComm::setCommandCallback(BLECommandCallback callback) {
   commandCallback = callback;
+  if (callback != nullptr) {
+    Serial.println("[BLE] ✓ Command callback registered");
+  } else {
+    Serial.println("[BLE] ⚠ Command callback cleared (set to null)");
+  }
+}
+
+void BLEComm::printStatus() {
+  Serial.println("[BLE] ========== BLE Status ==========");
+  Serial.printf("[BLE] Connected: %s\n", connected ? "YES" : "NO");
+  Serial.printf("[BLE] Server: %s\n", server != nullptr ? "OK" : "NULL");
+  Serial.printf("[BLE] TX Characteristic: %s\n", txChar != nullptr ? "OK" : "NULL");
+  Serial.printf("[BLE] RX Characteristic: %s\n", rxChar != nullptr ? "OK" : "NULL");
+  Serial.printf("[BLE] Callback: %s\n", commandCallback != nullptr ? "REGISTERED" : "NOT SET");
+  Serial.println("[BLE] ==================================");
 }

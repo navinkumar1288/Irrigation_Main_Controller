@@ -1,4 +1,7 @@
-// UserCommunication.h - Handles all user communication (SMS, BLE, LoRa, MQTT, WiFi, HTTP, Serial)
+// UserCommunication.h - Centralized user communication and diagnostics
+// Channels: SMS, BLE, LoRa, MQTT, WiFi, HTTP, Serial
+// Diagnostics: Status reporting, health monitoring, event notifications
+
 #ifndef USER_COMMUNICATION_H
 #define USER_COMMUNICATION_H
 
@@ -15,6 +18,7 @@
 
 // Forward declarations
 class ScheduleManager;
+class CommSetup;
 struct Schedule;
 
 // Command result structure
@@ -24,10 +28,48 @@ struct CommandResult {
   String commandType;
 };
 
-// Node command callback - called when user sends a node command
-// Returns true if command succeeded, false if failed
+// System status structure
+struct SystemStatusReport {
+  // Communication Modules
+  bool bleConnected;
+  bool loraInitialized;
+  bool wifiConnected;
+  bool modemReady;
+  bool smsReady;
+  bool mqttConnected;
+  bool httpReady;
+  bool ppposConnected;
+  
+  // System Status
+  String systemTime;
+  String uptime;
+  int successfulSchedules;
+  int failedSchedules;
+  bool scheduleRunning;
+  String currentSchedule;
+  
+  // Memory
+  uint32_t freeHeap;
+  uint32_t totalHeap;
+  
+  // Network
+  String ipAddress;
+  String wifiSSID;
+  int signalStrength;
+};
+
+// Node command callback
 typedef std::function<bool(int nodeId, const String& command)> NodeCommandCallback;
 
+/**
+ * UserCommunication Class
+ * 
+ * Centralized manager for:
+ * - All user communication channels
+ * - System diagnostics and status reporting
+ * - User-friendly notifications
+ * - Command processing and routing
+ */
 class UserCommunication {
 private:
   ModemSMS* smsComm;
@@ -36,11 +78,19 @@ private:
   MQTTComm* mqttComm;
   WiFiComm* wifiComm;
   HTTPComm* httpComm;
+  CommSetup* commSetup;
   NodeCommandCallback nodeCommandCallback;
   String adminPhone;
 
+  // Status gathering helpers
+  SystemStatusReport gatherSystemStatus(std::vector<Schedule>* schedules, bool scheduleRunning);
+  String formatStatusAsText(const SystemStatusReport &status);
+  String formatStatusAsJSON(const SystemStatusReport &status);
+  String formatStatusAsBrief(const SystemStatusReport &status);
+
   // Command handlers
   CommandResult handleStatusCommand();
+  CommandResult handleDiagnosticsCommand();
   CommandResult handleSchedulesCommand(std::vector<Schedule>* schedules);
   CommandResult handleStopCommand(bool* scheduleRunning, bool* scheduleLoaded);
   CommandResult handleStartCommand(const String &schedId);
@@ -49,42 +99,79 @@ private:
   CommandResult handleCheckCommand();
   CommandResult handleNodeCommand(const String &cmd);
   CommandResult handleHelpCommand();
+  CommandResult handleStatsCommand();
+  CommandResult handleReportCommand();
 
-  // Internal command routing
-  CommandResult routeCommand(const String &cmd, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
+  // Internal routing
+  CommandResult routeCommand(const String &cmd, std::vector<Schedule>* schedules, 
+                            bool* scheduleRunning, bool* scheduleLoaded, 
+                            bool* enableSMSBroadcast);
   void sendResponse(const String &response, const String &channel);
+  void sendMultiChannelResponse(const String &response);
 
 public:
   UserCommunication();
 
-  // Initialize with module pointers (NO NodeCommunication - uses callback instead)
-  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, MQTTComm* mqtt, WiFiComm* wifi, HTTPComm* http, const String &adminPhoneNum);
-
-  // Set callback for node commands (business logic in .ino file)
+  // ========== Initialization ==========
+  void init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, MQTTComm* mqtt, 
+            WiFiComm* wifi, HTTPComm* http, CommSetup* setup, const String &adminPhoneNum);
   void setNodeCommandCallback(NodeCommandCallback callback);
 
-  // Unified channel processing - checks all enabled communication channels
-  void processAllChannels(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
+  // ========== Diagnostics - Printing Functions ==========
+  void printSystemStatus(std::vector<Schedule>* schedules, bool scheduleRunning);
+  void printBriefStatus(std::vector<Schedule>* schedules, bool scheduleRunning);
+  void printCommStatus();
+  void printSystemDiagnostics();
+  void printNetworkDiagnostics();
+  void printLoRaDiagnostics();
+  void printBLEDiagnostics();
+  void printScheduleStatus(std::vector<Schedule>* schedules, bool scheduleRunning);
 
-  // Individual channel processors (called by processAllChannels)
-  void processSMSCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
-  void processLoRaCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
-  void processMQTTCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
-  void processWiFiCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
-  void processHTTPCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast);
+  // ========== Diagnostics - Status Retrieval ==========
+  SystemStatusReport getSystemStatus(std::vector<Schedule>* schedules, bool scheduleRunning);
+  String getFormattedStatus(std::vector<Schedule>* schedules, bool scheduleRunning, 
+                           const String &format = "text");
+  String getStatusJSON(std::vector<Schedule>* schedules, bool scheduleRunning);
+
+  // ========== Diagnostics - Broadcasting ==========
+  void broadcastSystemStatus(std::vector<Schedule>* schedules, bool scheduleRunning);
+  void sendAlert(const String &alertMessage, const String &severity = "INFO");
+
+  // ========== Event Notifications ==========
+  void notifyScheduleUpdate(const String &scheduleName, const String &status);
+  void onScheduleStarted(const String &scheduleId);
+  void onScheduleCompleted(const String &scheduleId);
+  void onScheduleFailed(const String &scheduleId, const String &reason);
+  void onValveAction(int nodeId, const String &valve, const String &action);
+  void onSystemError(const String &errorMessage);
+  void onSystemWarning(const String &warningMessage);
+
+  // ========== Health Monitoring ==========
+  bool isSystemHealthy();
+  String getHealthStatus();
+
+  // ========== Command Processing ==========
+  void processAllChannels(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                         bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void processSMSCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                         bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void processLoRaCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                          bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void processMQTTCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                          bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void processWiFiCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                          bool* scheduleLoaded, bool* enableSMSBroadcast);
+  void processHTTPCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                          bool* scheduleLoaded, bool* enableSMSBroadcast);
   void processBLECommand(int nodeId, const String &command);
-  void processSerialCommand(const String &input, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded);
+  void processSerialCommand(const String &input, std::vector<Schedule>* schedules, 
+                           bool* scheduleRunning, bool* scheduleLoaded);
+  void processMessage(const String &message);
 
-  // Publish status to all available channels (MQTT/SMS/BLE) - Use this for all notifications
-  void publishStatus(const String &msg);
-
-  // Process serial input (handles all serial commands)
-  void processSerialInput(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded);
-
-  // Process background tasks for all communication modules (MQTT/SMS auto-reconnect, message scanning)
-  void processBackground();
+  // ========== Utility Functions ==========
+  void sendCommandResponse(const String &command, const CommandResult &result, 
+                          const String &channel = "AUTO");
+  String getHelpText();
 };
-
-extern UserCommunication userComm;
 
 #endif

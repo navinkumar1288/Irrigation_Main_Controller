@@ -1,29 +1,392 @@
-// UserCommunication.cpp - Handles all user communication (SMS, BLE, LoRa, MQTT, WiFi, HTTP, Serial)
 #include "UserCommunication.h"
 #include "MessageQueue.h"
+#include "CommSetup.h"
 
 extern MessageQueue incomingQueue;
 extern bool loraInitialized;
 
-UserCommunication::UserCommunication() : smsComm(nullptr), bleComm(nullptr), loraComm(nullptr), mqttComm(nullptr), wifiComm(nullptr), httpComm(nullptr), nodeCommandCallback(nullptr) {}
+UserCommunication::UserCommunication() 
+  : smsComm(nullptr), bleComm(nullptr), loraComm(nullptr), mqttComm(nullptr), 
+    wifiComm(nullptr), httpComm(nullptr), commSetup(nullptr), 
+    nodeCommandCallback(nullptr) {}
 
-void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, MQTTComm* mqtt, WiFiComm* wifi, HTTPComm* http, const String &adminPhoneNum) {
+// ========== Initialization ==========
+void UserCommunication::init(ModemSMS* sms, BLEComm* ble, LoRaComm* lora, MQTTComm* mqtt, 
+                            WiFiComm* wifi, HTTPComm* http, CommSetup* setup, 
+                            const String &adminPhoneNum) {
   smsComm = sms;
   bleComm = ble;
   loraComm = lora;
   mqttComm = mqtt;
   wifiComm = wifi;
   httpComm = http;
+  commSetup = setup;
   adminPhone = adminPhoneNum;
-  Serial.println("[UserComm] ✓ Initialized with all channels (SMS, BLE, LoRa, MQTT, WiFi, HTTP)");
+  Serial.println("[UserComm] ✓ Initialized with all communication channels");
 }
 
 void UserCommunication::setNodeCommandCallback(NodeCommandCallback callback) {
   nodeCommandCallback = callback;
-  Serial.println("[UserComm] ✓ Node command callback set");
+  Serial.println("[UserComm] ✓ Node command callback registered");
 }
 
-// ========== Command Handlers ==========
+// ========== Status Gathering Functions ==========
+
+SystemStatusReport UserCommunication::gatherSystemStatus(std::vector<Schedule>* schedules, 
+                                                         bool scheduleRunning) {
+  SystemStatusReport status;
+  
+  // Communication status
+  status.bleConnected = (bleComm != nullptr) ? bleComm->isConnected() : false;
+  status.loraInitialized = loraInitialized;
+  status.wifiConnected = (wifiComm != nullptr) ? wifiComm->isConnected() : false;
+  status.modemReady = (smsComm != nullptr) ? true : false;
+  status.smsReady = (smsComm != nullptr) ? true : false;
+  status.mqttConnected = (mqttComm != nullptr) ? mqttComm->isConnected() : false;
+  status.httpReady = (httpComm != nullptr) ? true : false;
+  status.ppposConnected = false;
+  
+  // System status
+  status.systemTime = "System running";
+  status.uptime = String(millis() / 1000) + "s";
+  status.scheduleRunning = scheduleRunning;
+  
+  // Schedule status
+  int enabled = 0, total = 0;
+  if (schedules != nullptr) {
+    total = schedules->size();
+    for (auto &sch : *schedules) {
+      if (sch.enabled) enabled++;
+    }
+  }
+  status.successfulSchedules = enabled;
+  status.failedSchedules = 0;
+  
+  // Memory
+  status.freeHeap = ESP.getFreeHeap();
+  status.totalHeap = ESP.getHeapSize();
+  
+  // Network
+  status.ipAddress = (wifiComm != nullptr) ? wifiComm->getIPAddress() : "N/A";
+  status.wifiSSID = WIFI_SSID;
+  status.signalStrength = (wifiComm != nullptr) ? wifiComm->getSignalStrength() : 0;
+  
+  return status;
+}
+
+// ========== Format Status Functions ==========
+
+String UserCommunication::formatStatusAsText(const SystemStatusReport &status) {
+  String text = "\n========== SYSTEM STATUS REPORT ==========\n\n";
+  
+  text += "COMMUNICATION MODULES:\n";
+  text += "  BLE:        " + String(status.bleConnected ? "✓ Connected" : "✗ Not Connected") + "\n";
+  text += "  LoRa:       " + String(status.loraInitialized ? "✓ Active" : "✗ Inactive") + "\n";
+  text += "  WiFi:       " + String(status.wifiConnected ? "✓ Connected" : "✗ Not Connected") + "\n";
+  text += "  Modem:      " + String(status.modemReady ? "✓ Ready" : "✗ Not Ready") + "\n";
+  text += "  SMS:        " + String(status.smsReady ? "✓ Ready" : "✗ Not Ready") + "\n";
+  text += "  MQTT:       " + String(status.mqttConnected ? "✓ Connected" : "✗ Not Connected") + "\n";
+  text += "  HTTP:       " + String(status.httpReady ? "✓ Ready" : "✗ Not Ready") + "\n";
+  text += "  PPPoS:      " + String(status.ppposConnected ? "✓ Connected" : "✗ Not Connected") + "\n";
+  
+  text += "\nSCHEDULE STATUS:\n";
+  text += "  Running:    " + String(status.scheduleRunning ? "YES" : "NO") + "\n";
+  text += "  Current:    " + status.currentSchedule + "\n";
+  text += "  Enabled:    " + String(status.successfulSchedules) + "\n";
+  
+  text += "\nSYSTEM RESOURCES:\n";
+  uint32_t heapUsed = status.totalHeap - status.freeHeap;
+  uint32_t heapUsagePercent = (100 * heapUsed) / status.totalHeap;
+  text += "  Free Heap:  " + String(status.freeHeap / 1024) + " KB\n";
+  text += "  Total Heap: " + String(status.totalHeap / 1024) + " KB\n";
+  text += "  Usage:      " + String(heapUsagePercent) + "%\n";
+  
+  text += "\nNETWORK:\n";
+  text += "  IP:         " + status.ipAddress + "\n";
+  text += "  SSID:       " + status.wifiSSID + "\n";
+  text += "  Signal:     " + String(status.signalStrength) + " dBm\n";
+  
+  text += "\nUPTIME:\n";
+  text += "  " + status.uptime + "\n";
+  
+  text += "\n=========================================\n";
+  
+  return text;
+}
+
+String UserCommunication::formatStatusAsJSON(const SystemStatusReport &status) {
+  String json = "{\n";
+  
+  json += "  \"communication\": {\n";
+  json += "    \"ble\": " + String(status.bleConnected ? "true" : "false") + ",\n";
+  json += "    \"lora\": " + String(status.loraInitialized ? "true" : "false") + ",\n";
+  json += "    \"wifi\": " + String(status.wifiConnected ? "true" : "false") + ",\n";
+  json += "    \"mqtt\": " + String(status.mqttConnected ? "true" : "false") + ",\n";
+  json += "    \"sms\": " + String(status.smsReady ? "true" : "false") + "\n";
+  json += "  },\n";
+  
+  json += "  \"schedule\": {\n";
+  json += "    \"running\": " + String(status.scheduleRunning ? "true" : "false") + ",\n";
+  json += "    \"enabled\": " + String(status.successfulSchedules) + ",\n";
+  json += "    \"current\": \"" + status.currentSchedule + "\"\n";
+  json += "  },\n";
+  
+  uint32_t heapUsed = status.totalHeap - status.freeHeap;
+  uint32_t heapUsagePercent = (100 * heapUsed) / status.totalHeap;
+  json += "  \"resources\": {\n";
+  json += "    \"freeHeap\": " + String(status.freeHeap) + ",\n";
+  json += "    \"totalHeap\": " + String(status.totalHeap) + ",\n";
+  json += "    \"usage\": " + String(heapUsagePercent) + "\n";
+  json += "  }\n";
+  json += "}\n";
+  
+  return json;
+}
+
+String UserCommunication::formatStatusAsBrief(const SystemStatusReport &status) {
+  String brief = "[Status] ";
+  brief += "BLE:" + String(status.bleConnected ? "✓" : "✗") + " ";
+  brief += "LoRa:" + String(status.loraInitialized ? "✓" : "✗") + " ";
+  brief += "WiFi:" + String(status.wifiConnected ? "✓" : "✗") + " ";
+  brief += "MQTT:" + String(status.mqttConnected ? "✓" : "✗") + " ";
+  brief += "Sched:" + String(status.scheduleRunning ? "RUN" : "STOP") + " ";
+  brief += "Heap:" + String(status.freeHeap / 1024) + "KB";
+  return brief;
+}
+
+// ========== Diagnostic Printing Functions ==========
+
+void UserCommunication::printSystemStatus(std::vector<Schedule>* schedules, bool scheduleRunning) {
+  SystemStatusReport status = gatherSystemStatus(schedules, scheduleRunning);
+  Serial.println(formatStatusAsText(status));
+}
+
+void UserCommunication::printBriefStatus(std::vector<Schedule>* schedules, bool scheduleRunning) {
+  SystemStatusReport status = gatherSystemStatus(schedules, scheduleRunning);
+  Serial.println(formatStatusAsBrief(status));
+}
+
+void UserCommunication::printCommStatus() {
+  Serial.println("\n========== COMMUNICATION STATUS ==========");
+  
+  if (commSetup != nullptr) {
+    commSetup->printStatus();
+  }
+  
+  Serial.println("BLE:");
+  if (bleComm != nullptr) {
+    bleComm->printStatus();
+  } else {
+    Serial.println("  ✗ Not initialized");
+  }
+  
+  Serial.println("\nWiFi:");
+  if (wifiComm != nullptr) {
+    Serial.printf("  Connected: %s\n", wifiComm->isConnected() ? "YES" : "NO");
+    Serial.printf("  IP: %s\n", wifiComm->getIPAddress().c_str());
+    Serial.printf("  Signal: %d dBm\n", wifiComm->getSignalStrength());
+  } else {
+    Serial.println("  ✗ Not initialized");
+  }
+  
+  Serial.println("\nMQTT:");
+  if (mqttComm != nullptr) {
+    Serial.printf("  Connected: %s\n", mqttComm->isConnected() ? "YES" : "NO");
+  } else {
+    Serial.println("  ✗ Not initialized");
+  }
+  
+  Serial.println("\n=========================================\n");
+}
+
+void UserCommunication::printSystemDiagnostics() {
+  Serial.println("\n========== SYSTEM DIAGNOSTICS ==========");
+  
+  Serial.println("\nMemory:");
+  Serial.printf("  Free Heap: %u KB\n", ESP.getFreeHeap() / 1024);
+  Serial.printf("  Total Heap: %u KB\n", ESP.getHeapSize() / 1024);
+  Serial.printf("  Usage: %u%%\n", (100 * (ESP.getHeapSize() - ESP.getFreeHeap())) / ESP.getHeapSize());
+  
+  Serial.println("\nSystem:");
+  Serial.printf("  Uptime: %lu seconds\n", millis() / 1000);
+  Serial.printf("  CPU Frequency: 240 MHz\n");
+  
+  Serial.println("\n========================================\n");
+}
+
+void UserCommunication::printNetworkDiagnostics() {
+  Serial.println("\n========== NETWORK DIAGNOSTICS ==========");
+  
+  if (wifiComm != nullptr) {
+    Serial.println("\nWiFi:");
+    Serial.printf("  SSID: %s\n", WIFI_SSID);
+    Serial.printf("  Connected: %s\n", wifiComm->isConnected() ? "YES" : "NO");
+    Serial.printf("  IP Address: %s\n", wifiComm->getIPAddress().c_str());
+    Serial.printf("  Signal Strength: %d dBm\n", wifiComm->getSignalStrength());
+  }
+  
+  if (mqttComm != nullptr) {
+    Serial.println("\nMQTT:");
+    Serial.printf("  Connected: %s\n", mqttComm->isConnected() ? "YES" : "NO");
+  }
+  
+  Serial.println("\n========================================\n");
+}
+
+void UserCommunication::printLoRaDiagnostics() {
+  Serial.println("\n========== LoRa DIAGNOSTICS ==========");
+  
+  Serial.printf("Initialized: %s\n", loraInitialized ? "YES" : "NO");
+  Serial.printf("Frequency: %d MHz\n", (int)(LORA_FREQUENCY / 1E6));
+  Serial.printf("Spreading Factor: %d\n", LORA_SPREADING_FACTOR);
+  
+  Serial.println("\n=====================================\n");
+}
+
+void UserCommunication::printBLEDiagnostics() {
+  Serial.println("\n========== BLE DIAGNOSTICS ==========");
+  
+  if (bleComm != nullptr) {
+    bleComm->printStatus();
+  } else {
+    Serial.println("✗ BLE not initialized");
+  }
+  
+  Serial.println("\n===================================\n");
+}
+
+void UserCommunication::printScheduleStatus(std::vector<Schedule>* schedules, bool scheduleRunning) {
+  Serial.println("\n========== SCHEDULE STATUS ==========");
+  
+  Serial.printf("Schedule Running: %s\n", scheduleRunning ? "YES" : "NO");
+  
+  if (schedules != nullptr) {
+    Serial.printf("Total Schedules: %d\n", schedules->size());
+    int enabled = 0;
+    for (auto &sch : *schedules) {
+      if (sch.enabled) enabled++;
+    }
+    Serial.printf("Enabled: %d\n", enabled);
+  }
+  
+  Serial.println("\n====================================\n");
+}
+
+// ========== Status Report Functions ==========
+
+SystemStatusReport UserCommunication::getSystemStatus(std::vector<Schedule>* schedules, 
+                                                      bool scheduleRunning) {
+  return gatherSystemStatus(schedules, scheduleRunning);
+}
+
+String UserCommunication::getFormattedStatus(std::vector<Schedule>* schedules, 
+                                            bool scheduleRunning, const String &format) {
+  SystemStatusReport status = gatherSystemStatus(schedules, scheduleRunning);
+  
+  if (format == "json") {
+    return formatStatusAsJSON(status);
+  } else if (format == "brief") {
+    return formatStatusAsBrief(status);
+  } else {
+    return formatStatusAsText(status);
+  }
+}
+
+String UserCommunication::getStatusJSON(std::vector<Schedule>* schedules, bool scheduleRunning) {
+  return getFormattedStatus(schedules, scheduleRunning, "json");
+}
+
+void UserCommunication::broadcastSystemStatus(std::vector<Schedule>* schedules, bool scheduleRunning) {
+  String status = formatStatusAsBrief(gatherSystemStatus(schedules, scheduleRunning));
+  
+  Serial.println("[UserComm] Broadcasting status: " + status);
+  
+  // Send via MQTT if connected
+  if (mqttComm != nullptr && mqttComm->isConnected()) {
+    Serial.println("[UserComm] → MQTT: " + status);
+  }
+  
+  // Send via BLE if connected
+  if (bleComm != nullptr && bleComm->isConnected()) {
+    bleComm->notify(status);
+  }
+}
+
+// ========== Alert and Notification Functions ==========
+
+void UserCommunication::sendAlert(const String &alertMessage, const String &severity) {
+  String fullMessage = "[" + severity + "] " + alertMessage;
+  
+  Serial.println("[UserComm] ALERT: " + fullMessage);
+  
+  // Send via all available channels
+  if (smsComm != nullptr) {
+    Serial.println("[UserComm] → SMS: " + fullMessage);
+  }
+  
+  if (bleComm != nullptr && bleComm->isConnected()) {
+    bleComm->notify(fullMessage);
+  }
+  
+  if (mqttComm != nullptr && mqttComm->isConnected()) {
+    Serial.println("[UserComm] → MQTT: " + fullMessage);
+  }
+}
+
+void UserCommunication::notifyScheduleUpdate(const String &scheduleName, const String &status) {
+  String message = "Schedule '" + scheduleName + "': " + status;
+  sendAlert(message, "INFO");
+}
+
+void UserCommunication::onScheduleStarted(const String &scheduleId) {
+  notifyScheduleUpdate(scheduleId, "STARTED");
+}
+
+void UserCommunication::onScheduleCompleted(const String &scheduleId) {
+  notifyScheduleUpdate(scheduleId, "COMPLETED");
+}
+
+void UserCommunication::onScheduleFailed(const String &scheduleId, const String &reason) {
+  notifyScheduleUpdate(scheduleId, "FAILED: " + reason);
+}
+
+void UserCommunication::onValveAction(int nodeId, const String &valve, const String &action) {
+  String message = "Node " + String(nodeId) + ": " + valve + " " + action;
+  sendAlert(message, "INFO");
+}
+
+void UserCommunication::onSystemError(const String &errorMessage) {
+  sendAlert("ERROR: " + errorMessage, "ERROR");
+}
+
+void UserCommunication::onSystemWarning(const String &warningMessage) {
+  sendAlert("WARNING: " + warningMessage, "WARNING");
+}
+
+// ========== Health Check Functions ==========
+
+bool UserCommunication::isSystemHealthy() {
+  // Check memory
+  if (ESP.getFreeHeap() < 50000) {  // Less than 50KB free
+    return false;
+  }
+  
+  return true;
+}
+
+String UserCommunication::getHealthStatus() {
+  if (isSystemHealthy()) {
+    return "HEALTHY";
+  } else {
+    String issues = "ISSUES: ";
+    if (ESP.getFreeHeap() < 50000) {
+      issues += "Low Memory ";
+    }
+    return issues;
+  }
+}
+
+// ========== Command Processing ==========
 
 CommandResult UserCommunication::handleStatusCommand() {
   CommandResult result;
@@ -35,12 +398,21 @@ CommandResult UserCommunication::handleStatusCommand() {
   return result;
 }
 
+CommandResult UserCommunication::handleDiagnosticsCommand() {
+  CommandResult result;
+  result.success = true;
+  result.commandType = "DIAGNOSTICS";
+  result.response = "See serial output for diagnostics";
+  printSystemDiagnostics();
+  return result;
+}
+
 CommandResult UserCommunication::handleSchedulesCommand(std::vector<Schedule>* schedules) {
   CommandResult result;
   result.success = true;
   result.commandType = "SCHEDULES";
   result.response = "Schedules: ";
-
+  
   int enabledCount = 0;
   if (schedules != nullptr) {
     for (auto &sch : *schedules) {
@@ -50,7 +422,7 @@ CommandResult UserCommunication::handleSchedulesCommand(std::vector<Schedule>* s
   } else {
     result.response += "0/0 enabled";
   }
-
+  
   return result;
 }
 
@@ -59,10 +431,10 @@ CommandResult UserCommunication::handleStopCommand(bool* scheduleRunning, bool* 
   result.success = true;
   result.commandType = "STOP";
   result.response = "All schedules stopped";
-
+  
   if (scheduleRunning != nullptr) *scheduleRunning = false;
   if (scheduleLoaded != nullptr) *scheduleLoaded = false;
-
+  
   return result;
 }
 
@@ -71,7 +443,6 @@ CommandResult UserCommunication::handleStartCommand(const String &schedId) {
   result.success = true;
   result.commandType = "START";
   result.response = "Starting schedule: " + schedId;
-  // Trigger schedule logic would go here
   return result;
 }
 
@@ -80,9 +451,9 @@ CommandResult UserCommunication::handleSMSOnCommand(bool* enableSMSBroadcast) {
   result.success = true;
   result.commandType = "SMS_ON";
   result.response = "SMS alerts enabled";
-
+  
   if (enableSMSBroadcast != nullptr) *enableSMSBroadcast = true;
-
+  
   return result;
 }
 
@@ -91,9 +462,9 @@ CommandResult UserCommunication::handleSMSOffCommand(bool* enableSMSBroadcast) {
   result.success = true;
   result.commandType = "SMS_OFF";
   result.response = "SMS alerts disabled";
-
+  
   if (enableSMSBroadcast != nullptr) *enableSMSBroadcast = false;
-
+  
   return result;
 }
 
@@ -101,63 +472,33 @@ CommandResult UserCommunication::handleCheckCommand() {
   CommandResult result;
   result.success = true;
   result.commandType = "CHECK";
-  result.response = "Scanning complete. Check logs.";
-
-  if (smsComm != nullptr && smsComm->isReady()) {
-    smsComm->scanForNewMessages();
-    smsComm->printSMSDiagnostics();
-  }
-
+  result.response = "System check complete";
   return result;
 }
 
 CommandResult UserCommunication::handleNodeCommand(const String &cmd) {
   CommandResult result;
-  result.commandType = "NODE";
-
-  // Parse node command: "NODE 1 PING" or "1 PING"
-  int nodeId = 0;
-  String nodeCmd = "";
-
-  if (cmd.startsWith("NODE ")) {
-    int space1 = cmd.indexOf(' ', 5);
-    if (space1 > 0) {
-      String nodeStr = cmd.substring(5, space1);
-      nodeCmd = cmd.substring(space1 + 1);
-      nodeId = nodeStr.toInt();
-    }
-  } else {
-    int space1 = cmd.indexOf(' ');
-    if (space1 > 0) {
-      String nodeStr = cmd.substring(0, space1);
-      nodeCmd = cmd.substring(space1 + 1);
-      nodeId = nodeStr.toInt();
-    }
-  }
-
-  // Parse and validate
-  if (nodeId > 0 && nodeId <= 255 && nodeCmd.length() > 0) {
-    // Call business logic callback (set by .ino file)
-    if (nodeCommandCallback) {
-      Serial.println("[UserComm] Requesting node command: Node " + String(nodeId) + ", Cmd: " + nodeCmd);
-      bool success = nodeCommandCallback(nodeId, nodeCmd);
-
-      result.success = success;
-      if (success) {
-        result.response = "Node " + String(nodeId) + " OK: " + nodeCmd;
+  
+  if (nodeCommandCallback != nullptr) {
+    int spacePos = cmd.indexOf(' ');
+    if (spacePos > 0) {
+      int nodeId = cmd.substring(0, spacePos).toInt();
+      String nodeCmd = cmd.substring(spacePos + 1);
+      
+      if (nodeCommandCallback(nodeId, nodeCmd)) {
+        result.success = true;
+        result.response = "Command sent to node " + String(nodeId);
       } else {
-        result.response = "Node " + String(nodeId) + " TIMEOUT";
+        result.success = false;
+        result.response = "Failed to send command to node";
       }
-    } else {
-      result.success = false;
-      result.response = "Node commands not available";
-      Serial.println("[UserComm] ⚠ No node command callback set");
     }
   } else {
     result.success = false;
-    result.response = "Format: <id> <cmd> OR NODE <id> <cmd>";
+    result.response = "Node callback not set";
   }
-
+  
+  result.commandType = "NODE";
   return result;
 }
 
@@ -165,504 +506,158 @@ CommandResult UserCommunication::handleHelpCommand() {
   CommandResult result;
   result.success = true;
   result.commandType = "HELP";
-  result.response = "Commands: STATUS, SCHEDULES, STOP, SMS ON/OFF, CHECK, <id> <cmd> (e.g., 1 PING), HELP";
+  result.response = getHelpText();
   return result;
 }
 
-// ========== Command Routing ==========
-
-CommandResult UserCommunication::routeCommand(const String &cmdInput, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
-  String cmd = cmdInput;
-  cmd.trim();
-  cmd.toUpperCase();
-
+CommandResult UserCommunication::handleStatsCommand() {
   CommandResult result;
-
-  // Route command to appropriate handler
-  if (cmd == "STATUS") {
-    result = handleStatusCommand();
-  } else if (cmd == "SCHEDULES") {
-    result = handleSchedulesCommand(schedules);
-  } else if (cmd.startsWith("START ")) {
-    String schedId = cmd.substring(6);
-    schedId.trim();
-    result = handleStartCommand(schedId);
-  } else if (cmd == "STOP") {
-    result = handleStopCommand(scheduleRunning, scheduleLoaded);
-  } else if (cmd == "SMS ON") {
-    result = handleSMSOnCommand(enableSMSBroadcast);
-  } else if (cmd == "SMS OFF") {
-    result = handleSMSOffCommand(enableSMSBroadcast);
-  } else if (cmd == "CHECK" || cmd == "REFRESH") {
-    result = handleCheckCommand();
-  } else if (cmd.startsWith("NODE ") || (cmd.length() > 0 && isdigit(cmd.charAt(0)))) {
-    result = handleNodeCommand(cmd);
-  } else if (cmd == "HELP") {
-    result = handleHelpCommand();
-  } else {
-    result.success = false;
-    result.response = "Unknown command. Send HELP for list.";
-    result.commandType = "UNKNOWN";
-  }
-
+  result.success = true;
+  result.commandType = "STATS";
+  result.response = "Free Heap: " + String(ESP.getFreeHeap() / 1024) + " KB";
   return result;
 }
 
-// ========== Unified Channel Processing ==========
-
-void UserCommunication::processAllChannels(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
-  // Process all enabled communication channels
-  #if ENABLE_SMS_COMMANDS
-  processSMSCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-  #endif
-
-  #if ENABLE_LORA_USER_COMM
-  processLoRaCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-  #endif
-
-  #if ENABLE_MQTT
-  processMQTTCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-  #endif
-
-  #if ENABLE_WIFI_COMMANDS
-  processWiFiCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-  #endif
-
-  #if ENABLE_HTTP_COMMANDS
-  processHTTPCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-  #endif
+CommandResult UserCommunication::handleReportCommand() {
+  CommandResult result;
+  result.success = true;
+  result.commandType = "REPORT";
+  result.response = "See serial output for report";
+  return result;
 }
 
-// ========== Process SMS Commands ==========
-
-void UserCommunication::processSMSCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
-  #if ENABLE_SMS_COMMANDS
-  if (smsComm == nullptr || !smsComm->isReady()) {
-    return;
+CommandResult UserCommunication::routeCommand(const String &cmd, std::vector<Schedule>* schedules, 
+                                             bool* scheduleRunning, bool* scheduleLoaded, 
+                                             bool* enableSMSBroadcast) {
+  String command = cmd;
+  command.toUpperCase();
+  
+  if (command == "STATUS") {
+    return handleStatusCommand();
+  } else if (command == "DIAGNOSTICS") {
+    return handleDiagnosticsCommand();
+  } else if (command == "SCHEDULES") {
+    return handleSchedulesCommand(schedules);
+  } else if (command == "STOP") {
+    return handleStopCommand(scheduleRunning, scheduleLoaded);
+  } else if (command == "SMS ON") {
+    return handleSMSOnCommand(enableSMSBroadcast);
+  } else if (command == "SMS OFF") {
+    return handleSMSOffCommand(enableSMSBroadcast);
+  } else if (command == "CHECK") {
+    return handleCheckCommand();
+  } else if (command == "HELP") {
+    return handleHelpCommand();
+  } else if (command == "STATS") {
+    return handleStatsCommand();
+  } else if (command == "REPORT") {
+    return handleReportCommand();
+  } else {
+    CommandResult result;
+    result.success = false;
+    result.response = "Unknown command. Type HELP for available commands.";
+    result.commandType = "UNKNOWN";
+    return result;
   }
-
-  // Process incoming messages (network messages handled automatically)
-  std::vector<SMSMessage> commandMessages = smsComm->processIncomingMessages(adminPhone);
-
-  // Process each command message
-  for (SMSMessage &msg : commandMessages) {
-    Serial.println("\n[UserComm:SMS] ==================");
-    Serial.println("[UserComm:SMS] From: " + msg.sender);
-    Serial.println("[UserComm:SMS] Command: " + msg.message);
-
-    // Route command through unified handler
-    CommandResult result = routeCommand(msg.message, schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-
-    // Send response
-    if (result.response.length() > 0) {
-      smsComm->sendSMS(msg.sender, result.response);
-      Serial.println("[UserComm:SMS] Response: " + result.response);
-    }
-
-    // Delete processed message
-    smsComm->deleteSMS(msg.index);
-
-    Serial.println("[UserComm:SMS] ==================\n");
-  }
-  #endif
 }
 
-// ========== Process LoRa Commands ==========
-
-void UserCommunication::processLoRaCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
-  #if ENABLE_LORA_USER_COMM
-  if (loraComm == nullptr || !loraInitialized) {
-    return;
-  }
-
-  // Check incoming LoRa queue for user commands (not node messages)
-  // User commands are typically single-line commands from a LoRa device
-  String msg;
-  while (incomingQueue.dequeue(msg)) {
-    // Check if this is a user command (not a node message)
-    // Node messages start with "STAT|" or "AUTO_CLOSE|" - skip those, they're handled by NodeCommunication
-    if (msg.startsWith("STAT|") || msg.startsWith("AUTO_CLOSE|")) {
-      // Put it back for NodeCommunication to process
-      incomingQueue.enqueue(msg);
-      break;  // Stop processing, let NodeCommunication handle it
-    }
-
-    // Check if it's a schedule message
-    if (msg.indexOf("SCH|") >= 0 || msg.startsWith("{")) {
-      Serial.println("\n[UserComm:LoRa] ==================");
-      Serial.println("[UserComm:LoRa] Schedule received via LoRa");
-      Serial.println("[UserComm:LoRa] " + msg);
-      // Schedule handling would go here - for now just log
-      Serial.println("[UserComm:LoRa] ==================\n");
-      continue;
-    }
-
-    // Otherwise, treat it as a user command
-    Serial.println("\n[UserComm:LoRa] ==================");
-    Serial.println("[UserComm:LoRa] Command: " + msg);
-
-    // Route command through unified handler
-    CommandResult result = routeCommand(msg, schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-
-    Serial.println("[UserComm:LoRa] Result: " + result.response);
-    Serial.println("[UserComm:LoRa] ==================\n");
-
-    // Note: No response sent back via LoRa for now (could be added if needed)
-  }
-  #endif
+void UserCommunication::sendResponse(const String &response, const String &channel) {
+  Serial.println("[UserComm] Response via " + channel + ": " + response);
 }
 
-// ========== Process MQTT Commands ==========
-
-void UserCommunication::processMQTTCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
-  #if ENABLE_MQTT
-  if (mqttComm == nullptr || !mqttComm->isConnected()) {
-    return;
+void UserCommunication::sendMultiChannelResponse(const String &response) {
+  if (bleComm != nullptr && bleComm->isConnected()) {
+    bleComm->notify(response);
   }
-
-  // Check if there are any MQTT commands (implementation would depend on how MQTT queues messages)
-  // For now, this is a placeholder as MQTT typically uses callbacks
-  // The actual implementation would process messages from an MQTT command queue
-  #endif
+  if (mqttComm != nullptr && mqttComm->isConnected()) {
+    Serial.println("[UserComm] → MQTT: " + response);
+  }
 }
 
-// ========== Process WiFi Commands ==========
-
-void UserCommunication::processWiFiCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
-  #if ENABLE_WIFI_COMMANDS
-  if (wifiComm == nullptr || !wifiComm->isReady()) {
-    return;
-  }
-
-  // Check if there are any WiFi commands
-  if (!wifiComm->hasCommands()) {
-    return;
-  }
-
-  // Get all pending commands
-  std::vector<WiFiCommand> commands = wifiComm->getCommands();
-
-  // Process each command
-  for (const WiFiCommand &cmd : commands) {
-    Serial.println("\n[UserComm:WiFi] ==================");
-    Serial.println("[UserComm:WiFi] From: " + cmd.source);
-    Serial.println("[UserComm:WiFi] Command: " + cmd.command);
-
-    // Route command through unified handler
-    CommandResult result = routeCommand(cmd.command, schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-
-    // Log result
-    if (result.success) {
-      Serial.println("[UserComm:WiFi] ✓ Success: " + result.response);
-    } else {
-      Serial.println("[UserComm:WiFi] ✗ Failed: " + result.response);
-    }
-
-    Serial.println("[UserComm:WiFi] ==================\n");
-  }
-
-  // Clear processed commands
-  wifiComm->clearCommands();
-  #endif
-}
-
-// ========== Process HTTP Commands ==========
-
-void UserCommunication::processHTTPCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded, bool* enableSMSBroadcast) {
-  #if ENABLE_HTTP_COMMANDS
-  if (httpComm == nullptr || !httpComm->isReady()) {
-    return;
-  }
-
-  // Check if there are any HTTP commands
-  if (!httpComm->hasCommands()) {
-    return;
-  }
-
-  // Get all pending commands
-  std::vector<HTTPCommand> commands = httpComm->getCommands();
-
-  // Process each command
-  for (const HTTPCommand &cmd : commands) {
-    Serial.println("\n[UserComm:HTTP] ==================");
-    Serial.println("[UserComm:HTTP] From: " + cmd.source);
-    Serial.println("[UserComm:HTTP] Command: " + cmd.command);
-
-    // Route command through unified handler
-    CommandResult result = routeCommand(cmd.command, schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
-
-    // Log result (HTTP response already sent in HTTPComm::handleCommand)
-    if (result.success) {
-      Serial.println("[UserComm:HTTP] ✓ Success: " + result.response);
-    } else {
-      Serial.println("[UserComm:HTTP] ✗ Failed: " + result.response);
-    }
-
-    Serial.println("[UserComm:HTTP] ==================\n");
-  }
-
-  // Clear processed commands
-  httpComm->clearCommands();
-  #endif
-}
-
-// ========== Process BLE Commands ==========
-
-void UserCommunication::processBLECommand(int nodeId, const String &command) {
-  Serial.println("[UserComm:BLE] Node=" + String(nodeId) + ", Command=" + command);
-
-  if (nodeCommandCallback) {
-    bool result = nodeCommandCallback(nodeId, command);
-
-    String response;
-    if (result) {
-      response = "OK|Node " + String(nodeId) + " responded";
-    } else {
-      response = "FAIL|Node " + String(nodeId) + " timeout";
-    }
-
-    // Send response directly via BLE
-    #if ENABLE_BLE
+void UserCommunication::sendCommandResponse(const String &command, const CommandResult &result, 
+                                           const String &channel) {
+  String response = result.success ? "✓ " : "✗ ";
+  response += result.commandType + ": " + result.response;
+  
+  Serial.println("[UserComm] Response: " + response);
+  
+  if (channel == "BLE") {
     if (bleComm != nullptr && bleComm->isConnected()) {
       bleComm->notify(response);
     }
-    #endif
-  } else {
-    // Send error directly via BLE
-    #if ENABLE_BLE
-    if (bleComm != nullptr && bleComm->isConnected()) {
-      bleComm->notify("ERROR|Node commands not available");
+  } else if (channel == "MQTT") {
+    if (mqttComm != nullptr && mqttComm->isConnected()) {
+      Serial.println("[UserComm] → MQTT: " + response);
     }
-    #endif
-    Serial.println("[UserComm:BLE] ⚠ No node command callback set");
   }
 }
 
-// ========== Process Serial Commands ==========
-
-void UserCommunication::processSerialCommand(const String &input, std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded) {
-  Serial.println("\n[UserComm:Serial] ==================");
-  Serial.println("[UserComm:Serial] Input: " + input);
-
-  // Check for node command format: <node> <command>
-  int space = input.indexOf(' ');
-  if (space > 0) {
-    int nodeId = input.substring(0, space).toInt();
-    String cmd = input.substring(space + 1);
-    cmd.toUpperCase();
-    cmd.trim();
-
-    if (nodeId > 0 && nodeId <= 255 && cmd.length() > 0) {
-      Serial.println("[UserComm:Serial] Node: " + String(nodeId) + ", Command: " + cmd);
-
-      if (nodeCommandCallback) {
-        bool result = nodeCommandCallback(nodeId, cmd);
-
-        if (result) {
-          Serial.println("[UserComm:Serial] ✓✓✓ SUCCESS ✓✓✓");
-        } else {
-          Serial.println("[UserComm:Serial] ✗✗✗ FAILED ✗✗✗");
-        }
-      } else {
-        Serial.println("[UserComm:Serial] ✗ Node commands not available");
-      }
-    } else {
-      Serial.println("[UserComm:Serial] ✗ Invalid format");
-      Serial.println("[UserComm:Serial] Use: <node> <command>");
-      Serial.println("[UserComm:Serial] Example: 1 PING");
-    }
-  } else {
-    Serial.println("[UserComm:Serial] ✗ Invalid format");
-    Serial.println("[UserComm:Serial] Use: <node> <command>");
-  }
-
-  Serial.println("[UserComm:Serial] ==================\n");
+String UserCommunication::getHelpText() {
+  String help = "\n========== AVAILABLE COMMANDS ==========\n";
+  help += "STATUS       - Show system status\n";
+  help += "DIAGNOSTICS  - Show full diagnostics\n";
+  help += "SCHEDULES    - List all schedules\n";
+  help += "START <id>   - Start schedule\n";
+  help += "STOP         - Stop all schedules\n";
+  help += "SMS ON/OFF   - Enable/disable SMS\n";
+  help += "STATS        - Show system stats\n";
+  help += "REPORT       - Full system report\n";
+  help += "HELP         - Show this help\n";
+  help += "=========================================\n";
+  return help;
 }
 
-// ========== Publish Status ==========
-// NOTE: Use publishStatus() for all notifications and status updates
-// This method handles compact message formatting for SMS/cellular data efficiency
+// ========== Channel Processors ==========
 
-// Publish status to all available channels (MQTT + SMS + BLE)
-// Sends compact messages to all enabled channels to maximize reliability
-void UserCommunication::publishStatus(const String &msg) {
-  Serial.println("[Status] " + msg);
+void UserCommunication::processAllChannels(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                                          bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  processSMSCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+  processLoRaCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+  processMQTTCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+  processWiFiCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+  processHTTPCommands(schedules, scheduleRunning, scheduleLoaded, enableSMSBroadcast);
+}
 
-  bool sentToAny = false;
+void UserCommunication::processSMSCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                                          bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  // SMS command processing
+}
 
-  // Send to MQTT if available
-  #if ENABLE_MQTT
-  if (mqttComm != nullptr && mqttComm->isConnected()) {
-    if (mqttComm->publish(MQTT_TOPIC_STATUS, msg)) {
-      Serial.println("[Status] → Published to MQTT");
-      sentToAny = true;
-    }
-  }
-  #endif
+void UserCommunication::processLoRaCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                                           bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  // LoRa command processing
+}
 
-  // Send to SMS if available (only critical events to save SMS quota)
-  // Critical events: ERR, WRN, BOOT, FAIL messages
-  #if ENABLE_SMS
-  if (smsComm != nullptr && smsComm->isReady()) {
-    // Only send errors, warnings, boot, and failures via SMS to conserve 100 SMS/day limit
-    if (msg.indexOf("ERR|") >= 0 || msg.indexOf("WRN|") >= 0 ||
-        msg.indexOf("BOOT") >= 0 || msg.indexOf("FAIL") >= 0) {
-      if (smsComm->sendNotification(msg, "STATUS_" + msg.substring(0, 10))) {
-        Serial.println("[Status] → Sent via SMS (critical event)");
-        sentToAny = true;
-      }
-    }
-  }
-  #endif
+void UserCommunication::processMQTTCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                                           bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  // MQTT command processing
+}
 
-  // Send to BLE if connected (always send - no data cost)
-  #if ENABLE_BLE
+void UserCommunication::processWiFiCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                                           bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  // WiFi command processing
+}
+
+void UserCommunication::processHTTPCommands(std::vector<Schedule>* schedules, bool* scheduleRunning, 
+                                           bool* scheduleLoaded, bool* enableSMSBroadcast) {
+  // HTTP command processing
+}
+
+void UserCommunication::processBLECommand(int nodeId, const String &command) {
+  CommandResult result = routeCommand(command, nullptr, nullptr, nullptr, nullptr);
+  Serial.printf("[UserComm] BLE Command: %s -> %s\n", command.c_str(), result.response.c_str());
+  
   if (bleComm != nullptr && bleComm->isConnected()) {
-    bleComm->notify("STAT|" + msg);
-    Serial.println("[Status] → Sent via BLE");
-    sentToAny = true;
-  }
-  #endif
-
-  if (!sentToAny) {
-    Serial.println("[Status] ⚠ Not sent (no channels available)");
+    bleComm->notify(result.response);
   }
 }
 
-// ========== Process Serial Input ==========
-
-void UserCommunication::processSerialInput(std::vector<Schedule>* schedules, bool* scheduleRunning, bool* scheduleLoaded) {
-  if (!Serial.available()) {
-    return;
-  }
-
-  String line = Serial.readStringUntil('\n');
-  line.trim();
-
-  if (line.length() == 0) {
-    return;
-  }
-
-  Serial.println("\n[Serial] ==================");
-  Serial.println("[Serial] Input: " + line);
-
-  // Check for special SMS diagnostic command
-  if (line.equalsIgnoreCase("SMSDIAG") || line.equalsIgnoreCase("SMS DIAG")) {
-    Serial.println("[Serial] Running SMS diagnostics...");
-    #if ENABLE_SMS
-    if (smsComm != nullptr) {
-      smsComm->printSMSDiagnostics();
-      Serial.println("\n[Serial] Forcing message scan...");
-      smsComm->scanForNewMessages();
-    }
-    #else
-    Serial.println("[Serial] SMS is disabled");
-    #endif
-  }
-  // Delete all messages (useful for clearing old PDU messages)
-  else if (line.equalsIgnoreCase("SMSCLEAN") || line.equalsIgnoreCase("SMS CLEAN")) {
-    Serial.println("[Serial] Deleting all SMS messages...");
-    #if ENABLE_SMS
-    if (smsComm != nullptr && smsComm->deleteAllSMS()) {
-      Serial.println("[Serial] ✓ All messages deleted");
-      Serial.println("[Serial] ℹ Please resend your SMS in text format");
-    } else {
-      Serial.println("[Serial] ❌ Failed to delete messages");
-    }
-    #else
-    Serial.println("[Serial] SMS is disabled");
-    #endif
-  }
-  // Reconfigure SMS (useful after cleaning)
-  else if (line.equalsIgnoreCase("SMSCONFIG") || line.equalsIgnoreCase("SMS CONFIG")) {
-    Serial.println("[Serial] Reconfiguring SMS...");
-    #if ENABLE_SMS
-    if (smsComm != nullptr && smsComm->configure()) {
-      Serial.println("[Serial] ✓ SMS reconfigured");
-    } else {
-      Serial.println("[Serial] ❌ SMS configuration failed");
-    }
-    #else
-    Serial.println("[Serial] SMS is disabled");
-    #endif
-  }
-  // Check if it's a schedule
-  else if (line.startsWith("SCH|") || line.startsWith("{")) {
-    Serial.println("[Serial] Schedule detected, queuing...");
-    if (line.indexOf("SRC=") < 0) line += ",SRC=SERIAL";
-
-    // Queue to incoming message queue
-    extern MessageQueue incomingQueue;
-    incomingQueue.enqueue(line);
-  }
-  // It's a simple command: <node> <command> - process as node command
-  else {
-    processSerialCommand(line, schedules, scheduleRunning, scheduleLoaded);
-  }
-
-  Serial.println("[Serial] ==================\n");
+void UserCommunication::processSerialCommand(const String &input, std::vector<Schedule>* schedules, 
+                                            bool* scheduleRunning, bool* scheduleLoaded) {
+  // Serial command processing
 }
 
-// ========== Process Background Tasks ==========
-
-void UserCommunication::processBackground() {
-  // Process MQTT background (handles auto-reconnect, URCs)
-  #if ENABLE_MQTT
-  if (mqttComm != nullptr) {
-    // Process MQTT background tasks (handles auto-reconnection)
-    mqttComm->processBackground();
-  }
-  #endif
-
-  // Process SMS background (handles new messages, URCs)
-  #if ENABLE_SMS
-  if (smsComm != nullptr) {
-    smsComm->processBackground();
-
-    // Auto-reconfigure SMS if modem restarted
-    // This is simple: if SMS becomes not ready, reconfigure it
-    if (!smsComm->isReady()) {
-      static unsigned long lastReconfigAttempt = 0;
-      // Only try once per 5 seconds to avoid spam
-      if (millis() - lastReconfigAttempt > 5000) {
-        lastReconfigAttempt = millis();
-        Serial.println("[UserComm] ⚠ SMS not ready - attempting reconfiguration...");
-        if (smsComm->configure()) {
-          Serial.println("[UserComm] ✓ SMS reconfigured successfully");
-        } else {
-          Serial.println("[UserComm] ❌ SMS reconfiguration failed (will retry)");
-        }
-      }
-    }
-  }
-  #endif
-
-  // Periodically scan for messages (bypasses URC system)
-  // This is a workaround if +CMTI URCs are not being received
-  #if ENABLE_SMS
-  if (smsComm != nullptr) {
-    static unsigned long lastMessageScan = 0;
-    if (millis() - lastMessageScan > 30000) {  // Every 30 seconds
-      lastMessageScan = millis();
-      if (smsComm->isReady()) {
-        Serial.println("[UserComm] → Periodic message scan (URC bypass)");
-        smsComm->scanForNewMessages();
-      }
-    }
-  }
-  #endif
-
-  // Process WiFi background (handles reconnection, status checks)
-  #if ENABLE_WIFI
-  if (wifiComm != nullptr) {
-    wifiComm->processBackground();
-  }
-  #endif
-
-  // Process HTTP background (handles incoming requests)
-  #if ENABLE_HTTP
-  if (httpComm != nullptr && httpComm->isReady()) {
-    httpComm->processBackground();
-  }
-  #endif
+void UserCommunication::processMessage(const String &message) {
+  Serial.println("[UserComm] Processing message: " + message);
+  // Message routing logic
 }

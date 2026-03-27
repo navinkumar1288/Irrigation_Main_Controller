@@ -26,6 +26,7 @@ public:
   bool isConnected();
   void setConnected(bool state);
   void setCommandCallback(BLECommandCallback callback);
+  void printStatus();
   
   friend class MyCharacteristicCallbacks;
 };
